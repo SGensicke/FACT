@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Import · FACT</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --ink:#1a1612; --paper:#f5f0e8; --cream:#ede7d9; --sienna:#8b4513;
+  --sage:#4a6741; --rust:#c0392b; --muted:#7a7065; --border:#c8bfaf; --gold:#b8860b;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--paper); color: var(--ink); font-family: 'Cormorant Garamond', Georgia, serif; font-size: 18px; min-height: 100vh; }
+
+header {
+  background: var(--ink); color: var(--paper);
+  padding: .7rem 1.5rem; display: flex; align-items: center; gap: 1.2rem;
+  border-bottom: 3px solid var(--sienna);
+}
+header a { color: var(--border); text-decoration: none; font-size: .85rem; }
+header a:hover { color: white; }
+header h1 { font-size: 1.2rem; font-weight: 500; }
+
+.container { max-width: 760px; margin: 2.5rem auto; padding: 0 1.5rem; }
+
+.import-section {
+  border: 1px solid var(--border); border-radius: 4px;
+  background: white; margin-bottom: 1.75rem; overflow: hidden;
+}
+.import-head {
+  background: var(--cream); padding: .75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: baseline; gap: .75rem;
+}
+.import-head h2 { font-size: 1.05rem; font-weight: 500; }
+.import-head .badge {
+  font-size: .65rem; letter-spacing: .08em; text-transform: uppercase;
+  padding: .1rem .4rem; border-radius: 2px; background: var(--sienna); color: white;
+}
+.import-body { padding: 1.25rem; }
+.import-body p { font-size: .9rem; color: var(--muted); margin-bottom: 1rem; line-height: 1.6; }
+
+.csv-spec {
+  font-family: 'JetBrains Mono', monospace; font-size: .78rem;
+  background: #f5f0e8; border: 1px solid var(--border); border-radius: 3px;
+  padding: .6rem .85rem; margin-bottom: 1rem; line-height: 1.7;
+}
+
+.drop-zone {
+  border: 2px dashed var(--border); border-radius: 4px;
+  padding: 1.5rem; text-align: center;
+  color: var(--muted); font-style: italic; font-size: .9rem;
+  transition: border-color .15s, background .15s; cursor: pointer;
+  position: relative;
+}
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--sienna); background: #fff8f3; }
+.drop-zone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.drop-zone .dz-icon { font-size: 1.8rem; display: block; margin-bottom: .4rem; }
+
+.btn { padding: .42rem 1rem; font-family: inherit; font-size: .9rem; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.btn-primary { background: var(--sienna); color: white; }
+.btn-primary:hover { background: #7a3b10; }
+.btn-primary:disabled { background: var(--border); cursor: default; }
+.btn-ghost { background: none; border-color: var(--border); color: var(--ink); }
+.btn-ghost:hover { background: var(--cream); }
+
+.result-box { margin-top: 1rem; padding: .75rem 1rem; border-radius: 4px; font-size: .88rem; display: none; }
+.result-box.ok  { background: #edfaea; border: 1px solid #5a9e50; }
+.result-box.err { background: #fdecea; border: 1px solid var(--rust); }
+.result-box table { width: 100%; border-collapse: collapse; margin-top: .5rem; }
+.result-box td { padding: .18rem .5rem; }
+.result-box td:first-child { color: var(--muted); font-size: .82rem; }
+.result-box td:last-child { font-family: 'JetBrains Mono', monospace; font-size: .82rem; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <a href="/">← Editor</a>
+  <h1>Database Import</h1>
+</header>
+
+<div class="container">
+
+  <!-- SQLite -->
+  <div class="import-section">
+    <div class="import-head">
+      <h2>Import SQLite Database</h2>
+      <span class="badge">.sqlite / .db</span>
+    </div>
+    <div class="import-body">
+      <p>Imports tags, formulae, and variants from a compatible SQLite file.
+         A <strong>preview</strong> is shown before the actual import, indicating what
+         is new and what already exists.</p>
+      <div class="drop-zone" id="sqlite-drop">
+        <span class="dz-icon">🗄</span>
+        Drop a .sqlite or .db file here, or click to choose
+        <input type="file" id="sqlite-file" accept=".sqlite,.db" onchange="sqliteFileSelected()">
+      </div>
+
+      <div id="sqlite-preview" style="display:none;margin-top:1rem">
+        <div id="sqlite-preview-content"></div>
+        <div style="margin-top:.75rem;display:flex;gap:.75rem;align-items:center">
+          <button class="btn btn-primary" id="sqlite-btn" onclick="doImport('sqlite')">Import now</button>
+          <button class="btn btn-ghost" onclick="resetSqlite()">Cancel</button>
+        </div>
+      </div>
+
+      <div class="result-box" id="sqlite-result"></div>
+    </div>
+  </div>
+
+  <!-- CSV -->
+  <div class="import-section">
+    <div class="import-head">
+      <h2>Import CSV</h2>
+      <span class="badge">.csv</span>
+    </div>
+    <div class="import-body">
+      <p>Expects a CSV file with semicolon or comma as separator and the following columns:</p>
+      <div class="csv-spec">formula ; tag ; text_xmlid ; string ; note
+<span style="color:var(--muted)">Creation account ; Old Testament ; UBfArras-014_int_01 ; In principio… ; optional</span></div>
+      <p>The columns <code>tag</code>, <code>text_xmlid</code>, <code>string</code>, and <code>note</code>
+         are optional. Missing values are left blank. Duplicates are skipped.</p>
+      <div class="drop-zone" id="csv-drop">
+        <span class="dz-icon">📄</span>
+        Drop a .csv file here, or click to choose
+        <input type="file" id="csv-file" accept=".csv,.txt" onchange="csvFileSelected()">
+      </div>
+      <div style="margin-top:.75rem">
+        <button class="btn btn-primary" id="csv-btn" onclick="doImport('csv')" disabled>Import</button>
+      </div>
+      <div class="result-box" id="csv-result"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── SQLite: preview first ──────────────────────────────────────────────────
+async function sqliteFileSelected() {
+  const fileInput = document.getElementById('sqlite-file');
+  if (!fileInput.files.length) return;
+
+  const preview = document.getElementById('sqlite-preview');
+  const content = document.getElementById('sqlite-preview-content');
+  document.getElementById('sqlite-result').style.display = 'none';
+  content.innerHTML = '<span style="font-style:italic;color:var(--muted)">Analysing…</span>';
+  preview.style.display = 'block';
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  try {
+    const r = await fetch('/api/import/sqlite/preview', { method: 'POST', body: formData });
+    renderSqlitePreview(await r.json(), content);
+  } catch (e) {
+    content.innerHTML = `<span style="color:var(--rust)">Error analysing file: ${e.message}</span>`;
+  }
+}
+
+function renderSqlitePreview(p, container) {
+  if (p.ist_eigene_db) {
+    container.innerHTML = `
+      <div class="result-box err" style="display:block">
+        <strong>⚠ This appears to be your own database.</strong><br>
+        All ${p.ideale_vorhanden.length} formula(e) and ${p.varianten_vorhanden} variant(s) already exist.
+        Importing would add nothing new.
+      </div>`;
+    document.getElementById('sqlite-btn').disabled = true;
+    return;
+  }
+
+  const newBadge = n => n > 0 ? `<span style="color:#2d6a4f;font-weight:600">+${n} new</span>` : '';
+  const exiBadge = n => n > 0 ? `<span style="color:var(--muted)">${n} already present</span>` : '';
+
+  let html = `<div style="font-size:.9rem;line-height:1.9">
+    <strong>Preview – what would happen:</strong>
+    <table style="margin-top:.5rem;border-collapse:collapse;width:100%">
+      <tr><td style="padding:.15rem .5rem .15rem 0;color:var(--muted);font-size:.85rem">Tags</td>
+          <td>${newBadge(p.kategorien_neu.length)} ${exiBadge(p.kategorien_vorhanden.length)}</td></tr>
+      <tr><td style="padding:.15rem .5rem .15rem 0;color:var(--muted);font-size:.85rem">Formulae</td>
+          <td>${newBadge(p.ideale_neu.length)} ${exiBadge(p.ideale_vorhanden.length)}</td></tr>
+      <tr><td style="padding:.15rem .5rem .15rem 0;color:var(--muted);font-size:.85rem">Variants</td>
+          <td>${newBadge(p.varianten_neu)} ${exiBadge(p.varianten_vorhanden)}</td></tr>
+    </table>`;
+
+  if (p.ideale_neu.length) {
+    html += `<div style="margin-top:.6rem">
+      <span style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)">New Formulae</span><br>
+      <ul style="margin:.2rem 0 0 1rem;font-size:.83rem;font-style:italic">
+        ${p.ideale_neu.map(f => `<li>${esc(f)}</li>`).join('')}
+      </ul></div>`;
+  }
+  if (p.ideale_vorhanden.length) {
+    html += `<details style="margin-top:.5rem;font-size:.83rem">
+      <summary style="cursor:pointer;color:var(--muted)">Formulae already present (${p.ideale_vorhanden.length})</summary>
+      <ul style="margin:.2rem 0 0 1rem;font-style:italic;color:var(--muted)">
+        ${p.ideale_vorhanden.map(f => `<li>${esc(f)}</li>`).join('')}
+      </ul></details>`;
+  }
+  html += '</div>';
+
+  if (p.ideale_neu.length === 0 && p.varianten_neu === 0) {
+    html += `<div class="result-box err" style="display:block;margin-top:.6rem">
+      No new entries found – import would change nothing.</div>`;
+    document.getElementById('sqlite-btn').disabled = true;
+  } else {
+    document.getElementById('sqlite-btn').disabled = false;
+  }
+
+  container.innerHTML = html;
+}
+
+function resetSqlite() {
+  document.getElementById('sqlite-file').value = '';
+  document.getElementById('sqlite-preview').style.display = 'none';
+  document.getElementById('sqlite-result').style.display = 'none';
+}
+
+// ── CSV: file selection ────────────────────────────────────────────────────
+function csvFileSelected() {
+  document.getElementById('csv-btn').disabled = !document.getElementById('csv-file').files.length;
+}
+
+// ── Drag-over styling ──────────────────────────────────────────────────────
+['sqlite-drop', 'csv-drop'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('drag-over');
+    const type = id.startsWith('sqlite') ? 'sqlite' : 'csv';
+    document.getElementById(type + '-file').files = e.dataTransfer.files;
+    if (type === 'sqlite') sqliteFileSelected();
+    else csvFileSelected();
+  });
+});
+
+// ── Run import ─────────────────────────────────────────────────────────────
+async function doImport(type) {
+  const fileInput = document.getElementById(type + '-file');
+  if (!fileInput.files.length) return;
+
+  const btn       = document.getElementById(type + '-btn');
+  const resultBox = document.getElementById(type + '-result');
+  btn.disabled    = true;
+  btn.textContent = 'Importing…';
+  resultBox.style.display = 'none';
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  try {
+    const r    = await fetch(`/api/import/${type}`, { method: 'POST', body: formData });
+    const data = await r.json();
+
+    if (data.ok) {
+      const s = data.stats;
+      resultBox.className = 'result-box ok';
+      let html = `<strong>Import complete</strong>
+        <table>
+          <tr><td>New tags</td><td>+${s.kategorien}</td></tr>
+          <tr><td>New formulae</td><td>+${s.ideale}</td></tr>
+          <tr><td>New variants</td><td>+${s.varianten}</td></tr>`;
+
+      if (type === 'sqlite') {
+        html += `<tr><td>Skipped formulae (already present)</td><td>${s.dubletten_ideale}</td></tr>
+                 <tr><td>Skipped variants (already present)</td><td>${s.dubletten_varianten}</td></tr>`;
+      } else {
+        html += `<tr><td>Skipped (already present)</td><td>${s.dubletten}</td></tr>`;
+        if (s.fehler) html += `<tr><td>Rows with errors</td><td>${s.fehler}</td></tr>`;
+      }
+      html += '</table>';
+
+      if (s.hinweis) {
+        html += `<p style="margin-top:.5rem;font-size:.82rem;color:var(--muted)">${s.hinweis}</p>`;
+      }
+      resultBox.innerHTML = html;
+    } else {
+      resultBox.className = 'result-box err';
+      resultBox.innerHTML = `<strong>Error:</strong> ${data.error || 'Unknown error'}`;
+    }
+  } catch (e) {
+    resultBox.className = 'result-box err';
+    resultBox.innerHTML = `<strong>Network error:</strong> ${e.message}`;
+  }
+
+  resultBox.style.display = 'block';
+  btn.textContent = 'Import';
+  btn.disabled    = false;
+
+  if (type === 'sqlite') {
+    document.getElementById('sqlite-preview').style.display = 'none';
+  }
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>

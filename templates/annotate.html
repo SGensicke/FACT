@@ -1,0 +1,1977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FACT - Annotate &amp; Link</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+
+html, body { height: 100%; }
+body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+/* ── Workspace-Layout ── */
+.workspace {
+  display: grid;
+  grid-template-columns: 310px 1fr 310px;
+  flex: 1;
+  overflow: hidden;
+}
+/* ── Columns ── */
+.col { display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+.col:last-child { border-right: none; }
+.col-head {
+  padding: .55rem .85rem; background: var(--cream);
+  border-bottom: 1px solid var(--border);
+  font-size: .65rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  flex-shrink: 0; display: flex; align-items: center; gap: .5rem;
+}
+.col-body { overflow-y: auto; flex: 1; }
+
+/* Special handling for suggestions column */
+#suggestion-body { display: flex; flex-direction: column; overflow: hidden; }
+
+/* Tree controls */
+.tree-controls { padding: .5rem .7rem; background: #f9f5ee; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tree-search {
+  width: 100%; padding: .33rem .55rem; font-size: .8rem; font-family: inherit;
+  border: 1px solid var(--border); border-radius: 3px;
+  background: white; color: var(--ink); margin-bottom: .4rem;
+}
+.tree-search:focus { outline: none; border-color: var(--sienna); }
+.tree-search::placeholder { color: var(--muted); font-style: italic; }
+
+.facet-row { display: flex; flex-wrap: wrap; gap: .22rem; margin-bottom: .22rem; }
+.facet-label { font-size: .58rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); width: 100%; margin-bottom: .08rem; }
+.facet-chip {
+  font-size: .67rem; padding: .13rem .42rem; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--paper); color: var(--ink);
+  transition: background .12s; font-family: inherit;
+}
+.facet-chip:hover { background: var(--border); }
+.facet-chip.active-region   { background: #4a6741; color: white; border-color: #4a6741; }
+.facet-chip.active-textteil { background: #5b4a8a; color: white; border-color: #5b4a8a; }
+
+/* File tree */
+.file-group { border-bottom: 1px solid var(--border); }
+.file-head {
+  padding: .4rem .75rem; font-size: .75rem;
+  font-family: 'JetBrains Mono', monospace; color: var(--sienna);
+  cursor: pointer; display: flex; align-items: center; gap: .4rem; background: #f9f5ee;
+}
+.file-head:hover { background: var(--cream); }
+.file-head .toggle { font-size: .6rem; color: var(--muted); transition: transform .15s; }
+.file-head.open .toggle { transform: rotate(90deg); }
+.elem-list { display: none; }
+.elem-list.open { display: block; }
+.elem-item {
+  padding: .33rem .75rem .33rem 1.35rem; font-size: .78rem;
+  cursor: pointer; display: flex; align-items: baseline; gap: .38rem;
+  border-left: 2px solid transparent; transition: background .1s;
+}
+.elem-item:hover { background: var(--cream); }
+.elem-item.active { background: #ffe8d0; border-left-color: var(--sienna); }
+.elem-item.hidden { display: none; }
+.elem-tag {
+  font-family: 'JetBrains Mono', monospace; font-size: .67rem;
+  color: var(--sienna); background: #f0e4d8; padding: .02rem .26rem; border-radius: 2px; flex-shrink: 0;
+}
+.elem-preview { color: var(--muted); font-size: .72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.linked-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--linked-border); flex-shrink: 0; margin-left: auto; }
+
+.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--sienna); border-radius: 50%; animation: spin .6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: var(--ink); color: var(--paper); padding: .5rem 1rem; border-radius: 3px; font-size: .86rem; opacity: 0; transition: opacity .25s; pointer-events: none; z-index: 300; }
+#toast.show { opacity: 1; }
+
+/* ── Text panel ── */
+.text-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--muted); font-style: italic; font-size: 1rem; text-align: center; padding: 2rem; }
+.text-head {
+  padding: .55rem .85rem; background: #fffbf2;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0; display: flex; align-items: center; gap: .5rem;
+}
+.text-head .text-head-head { font-size: .65rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+.text-head .xmlid-label { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--sienna); }
+.text-head .s-tag   { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--sienna); align-self: flex-end;}
+
+.section { padding: 1.5rem 1.2rem 1rem; border-bottom: 1px solid #ede7d9; }
+.section-text { line-height: 1.85; font-size: 1rem; user-select: text; cursor: text; }
+
+/* Highlighted variants */
+.linked-span { background: var(--linked); border-bottom: 2px solid var(--linked-border); border-radius: 2px; cursor: help; position: relative; }
+.linked-span.overlaps { outline: 2px dashed #c87020; outline-offset: -1px; }
+.linked-span:hover::after {
+  content: attr(data-tooltip); position: absolute; bottom: 100%; left: 0;
+  background: var(--ink); color: var(--paper); font-size: .7rem;
+  padding: .2rem .5rem; border-radius: 3px; white-space: nowrap;
+  z-index: 20; pointer-events: none;
+}
+
+/* Overlap picker */
+.overlap-picker { background: var(--paper); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.18); padding: .4rem; min-width: 200px; }
+.op-title { font-size: .65rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-bottom: .3rem; padding: 0 .3rem; }
+.op-btn { display: block; width: 100%; text-align: left; padding: .3rem .5rem; font-family: inherit; font-size: .82rem; border: none; background: none; cursor: pointer; border-radius: 3px; color: var(--ink); }
+.op-btn:hover { background: var(--cream); }
+
+/* Drag chip */
+.drag-chip {
+  display: none; position: fixed;
+  background: var(--sel-bg); border: 1.5px solid var(--sel-border);
+  border-radius: 4px; padding: .28rem .6rem; font-size: .82rem; font-style: italic;
+  max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 3px 12px rgba(0,0,0,.18); pointer-events: none; z-index: 200;
+}
+
+/* Suggestions panel */
+.suggestion-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 1rem;
+  text-align: center;
+
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+}
+/* Fixed header section */
+.suggestions-fixed-header { flex-shrink: 0; }
+.selection-box { margin: .6rem .65rem .3rem; background: var(--sel-bg); border: 1.5px solid var(--sel-border); border-radius: 4px; padding: .42rem .6rem; cursor: grab; }
+.selection-box:active { cursor: grabbing; }
+.sel-label { font-size: .58rem; text-transform: uppercase; letter-spacing: .1em; color: var(--gold); margin-bottom: .12rem; }
+.sel-text  { font-style: italic; line-height: 1.4; font-size: .88rem; }
+
+/* Scrollable list section */
+.suggestion-list { padding: .3rem .65rem .65rem; overflow-y: auto; flex: 1; }
+.suggestion-label { font-size: .58rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin-bottom: .4rem; }
+
+/* New formula zone */
+.new-formula-zone {
+  border: 2px dashed var(--sienna); border-radius: 4px;
+  padding: .5rem .6rem; text-align: center; font-size: .8rem;
+  color: var(--sienna); background: #fff8f3;
+  transition: background .15s; margin: 0 .65rem .55rem;
+}
+.new-formula-zone.drag-over { background: #ffe8d0; }
+.new-formula-zone .new-btn { background: none; border: none; cursor: pointer; font-family: inherit; font-size: .8rem; color: var(--sienna); text-decoration: underline; padding: 0; }
+.new-formula-zone .new-hint { font-size: .68rem; color: var(--muted); margin-top: .15rem; }
+
+/* Tag multi-widget */
+.tag-multi-widget { border: 1px solid var(--border); border-radius: 6px; padding: .4rem; background: #fff; }
+.tag-chips-display { display: flex; flex-wrap: wrap; gap: .3rem; min-height: 1.4rem; margin-bottom: .3rem; }
+.tag-chip-item { display: inline-flex; align-items: center; gap: .2rem; background: var(--cream); border: 1px solid var(--border); border-radius: 12px; padding: .08rem .45rem; font-size: .78rem; }
+.tag-chip-item button { background: none; border: none; cursor: pointer; color: var(--muted); font-size: .7rem; padding: 0; line-height: 1; }
+.tag-chip-item button:hover { color: var(--rust); }
+.tag-add-row { display: flex; gap: .25rem; }
+.tag-add-input { flex: 1; font-size: .82rem; padding: .18rem .38rem; border: 1px solid var(--border); border-radius: 4px; }
+.tag-suggestions { background: #fff; border: 1px solid var(--border); border-radius: 4px; margin-top: 1px; max-height: 120px; overflow-y: auto; }
+.tag-sug-item { padding: .22rem .45rem; cursor: pointer; font-size: .82rem; }
+.tag-sug-item:hover { background: var(--cream); }
+/* colour picker in tag widget */
+.tag-color-btn { display: inline-block; width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,.18); cursor: pointer; transition: transform .12s; }
+.tag-color-btn:hover { transform: scale(1.25); }
+.color-popover { position: fixed; z-index: 500; background: var(--paper); border: 1px solid var(--border); border-radius: 5px; padding: .4rem .5rem; box-shadow: 0 4px 16px rgba(0,0,0,.15); display: flex; flex-wrap: wrap; gap: .3rem; width: 148px; }
+.color-swatch { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 1.5px solid rgba(0,0,0,.15); transition: transform .1s; }
+.color-swatch:hover { transform: scale(1.2); }
+.color-swatch.selected { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.detail-modal .detail-table-scroll {
+  max-height: 56vh;
+  overflow: auto;
+  margin-bottom: .55rem;
+}
+.detail-modal .var-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.detail-modal .var-table th,
+.detail-modal .var-table td {
+  padding: .45rem .55rem;
+  border-bottom: 1px solid var(--border);
+}
+.detail-modal .var-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  z-index: 2;
+  text-align: left;
+}
+.detail-modal .bulk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .5rem;
+  padding: .25rem .35rem .5rem;
+}
+.detail-modal .bulk-actions .btn-bulk.active {
+  background: #f5f2e7;
+}
+
+/* Search highlights */
+.elem-item mark { background: #fff0a0; color: inherit; border-radius: 2px; padding: 0 1px; }
+mark.search-hit { background: #fff0a0; color: inherit; border-radius: 2px; padding: 0 1px; outline: 1px solid #e6c800; }
+.elem-item.keyboard-focus { background: #ffe8d0; border-left-color: var(--sienna); outline: 2px solid var(--sienna); outline-offset: -2px; }
+
+.mono { font-family: 'JetBrains Mono', monospace; font-size: .73rem; color: var(--sienna); }
+.edit-btn { background: none; border: 1px solid var(--border); border-radius: 3px; padding: .18rem .45rem; font-size: .72rem; cursor: pointer; font-family: inherit; }
+.edit-btn:hover { background: var(--cream); }
+</style>
+</head>
+<body>
+
+<header>
+  <a href="/">← Overview</a>
+  <h1>FACT</h1>
+  <span class="sub">Annotate &amp; Link</span>
+  <div class="header-actions">
+    <a href="/invalid" target="_blank" id="inv-link" class="header-btn" title="Show invalid variants">⚠ Validation pending</a>
+    <button onclick="reloadCache()" id="reload-cache-btn" class="header-btn" title="Reload XML cache (after changes to XML files)">↺ XML Cache</button>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- Column 1: File tree -->
+  <div class="col">
+    <div class="col-head">
+      XML Files
+      <span id="tree-spinner" class="spinner" style="display:none"></span>
+    </div>
+    <div class="tree-controls">
+      <div class="search-wrap">
+        <input id="tree-search" placeholder="xml:id or text… (* wildcard)" oninput="onTreeSearchInput()" onkeydown="treeSearchKey(event)">
+        <span id="tree-search-spinner" class="spinner" style="display:none;position:absolute;right:.45rem;top:.45rem"></span>
+      </div>
+      <div id="tree-search-hint" style="font-size:.68rem;color:var(--muted);font-style:italic;min-height:.9rem;margin-bottom:.2rem"></div>
+      <div class="facet-row" id="facet-region-row">
+        <span class="facet-label">Regions</span>
+      </div>
+      <div class="facet-row" id="facet-section-row">
+        <span class="facet-label">Diplomatic Sections</span>
+      </div>
+    </div>
+    <div class="col-body" id="tree-body">
+      <div style="padding:1rem;color:var(--muted);font-style:italic;font-size:.8rem">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Column 2: Text -->
+  <div class="col">
+    <div id="text-head-wrap"></div>
+    <div class="col-body" id="text-body">
+      <div class="text-empty">← 1. Choose an element</div>
+    </div>
+  </div>
+
+  <!-- Column 3: Suggestions -->
+  <div class="col">
+    <div class="col-head">Suggested Formulae</div>
+    <div class="col-body" id="suggestion-body">
+      <div class="suggestion-empty">← 2. Highlight text to<br>show formula suggestions</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="drag-chip" id="drag-chip"></div>
+
+<!-- Modal: New formula -->
+<div class="overlay" id="new-formula-overlay">
+  <div class="modal">
+    <h3>Link Variant to Formula</h3>
+    <div class="prefill-text" id="new-var-text"></div>
+    
+    <!-- Mode toggle -->
+    <div class="field">
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-search-btn" onclick="switchFormulaMode('search')">Search Existing</button>
+        <button class="mode-btn" id="mode-new-btn" onclick="switchFormulaMode('new')">Create New</button>
+      </div>
+    </div>
+
+    <!-- Search mode -->
+    <div id="search-mode" class="formula-mode">
+      <div class="field">
+        <label>Search Formula</label>
+        <input id="formula-search-input" placeholder="Search by formula text…" oninput="searchFormulae()">
+      </div>
+      <div id="formula-search-results" class="formula-search-results"></div>
+    </div>
+
+    <!-- New mode -->
+    <div id="new-mode" class="formula-mode" style="display:none">
+      <div class="field">
+        <label>Formula</label>
+        <input id="new-formula-input" placeholder="New formula…">
+      </div>
+      <div class="field">
+        <label>Tags</label>
+        <div id="new-tag-widget" class="tag-multi-widget" style="font-size:.85rem"></div>
+      </div>
+      <div class="field">
+        <label>Note</label>
+        <input id="new-note-input" placeholder="Optional…">
+      </div>
+    </div>
+
+    <input type="hidden" id="new-xmlid">
+    <input type="hidden" id="selected-formula-id">
+    
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewFormulaModal()">Cancel</button>
+      <button class="btn btn-primary" id="save-formula-btn" onclick="saveFormulaLink()">Link Variant</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Formula detail (variants) -->
+<div class="overlay" id="detail-overlay">
+  <div class="detail-modal">
+    <div class="formula-head">
+        <span class="formula-text" id="detail-formula-text"></span>
+        <span class="actions">
+          <button class="btn btn-danger btn-sm" id="detail-delete-btn" style="display:none" onclick="deleteFormulaDetail()" title="Delete Formula">✕ Delete</button>
+          <button class="btn btn-ghost btn-sm" id="detail-inline-edit-btn" onclick="toggleFormulaInlineEdit()" title="Edit Formula"></button>
+          <button class="btn btn-ghost btn-sm" onclick="closeDetailModal()" title="Close">✕</button>
+        </span>
+    </div>
+    <div>
+      <!-- Inline edit panel -->
+      <div id="detail-inline-edit-panel" style="display:none;background:var(--cream);padding:.75rem;position:sticky;top:0;z-index:10;border-bottom:1px solid var(--border)">
+        <div class="field" style="margin-bottom:.6rem">
+          <label>Formula</label>
+          <input id="detail-edit-formula" style="width:100%;font-family:inherit;font-size:.95rem;padding:.32rem .5rem;border:1px solid var(--border);border-radius:3px">
+        </div>
+        <div class="field" style="margin-bottom:.6rem">
+          <label>Tags</label>
+          <div id="detail-tag-widget" class="tag-multi-widget" style="font-size:.83rem"></div>
+        </div>
+        <div class="field" style="margin-bottom:.6rem">
+          <label>Note</label>
+          <input id="detail-edit-note" placeholder="Optional…" style="width:100%;font-family:inherit;font-size:.85rem;padding:.28rem .5rem;border:1px solid var(--border);border-radius:3px">
+        </div>
+        <div style="display:flex;gap:.5rem;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="toggleFormulaInlineEdit()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveFormulaInlineEdit()">Save</button>
+        </div>
+      </div>
+
+      <div id="detail-variants-wrap" class="formula-body"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Bulk move variants -->
+<div class="overlay" id="detail-bulk-move-overlay">
+  <div class="modal">
+    <h3>Move Variants to Another Formula</h3>
+    <p id="detail-bulk-move-count" style="font-size:.85rem;color:var(--muted);margin-bottom:1rem"></p>
+    <div class="field">
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="detail-bulk-mode-search-btn" onclick="switchDetailBulkMoveMode('search')">Move to existing Formula</button>
+        <button class="mode-btn" id="detail-bulk-mode-new-btn" onclick="switchDetailBulkMoveMode('new')">Create New Formula</button>
+      </div>
+    </div>
+    <div id="detail-bulk-search-mode" class="formula-mode">
+      <div class="field">
+        <label>Search Target Formula</label>
+        <input id="detail-bulk-formula-search" placeholder="Search by formula text…" oninput="searchDetailBulkFormulae()">
+      </div>
+      <div id="detail-bulk-formula-results" class="formula-search-results"></div>
+    </div>
+    <div id="detail-bulk-new-mode" class="formula-mode" style="display:none">
+      <div class="field">
+        <label>Formula</label>
+        <input id="detail-bulk-new-formula-input" placeholder="New formula…">
+      </div>
+      <div class="field">
+        <label>Tags</label>
+        <div id="detail-bulk-new-tag-widget" class="tag-multi-widget" style="font-size:.85rem"></div>
+      </div>
+      <div class="field">
+        <label>Note</label>
+        <input id="detail-bulk-new-note-input" placeholder="Optional…">
+      </div>
+    </div>
+    <input type="hidden" id="detail-bulk-source-formula-id">
+    <input type="hidden" id="detail-bulk-selected-variants">
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeDetailBulkMoveModal()">Cancel</button>
+      <button class="btn btn-primary" id="detail-bulk-move-btn" onclick="confirmDetailBulkMove()" disabled>Move Variants</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit variant -->
+<div class="overlay" id="vedit-overlay">
+  <div class="modal modal-large">
+    <h3>Edit Variant</h3>
+    <div class="field">
+      <label>Select text to update variant
+        <span id="vedit-file" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--muted);text-transform:none;letter-spacing:0"></span>
+      </label>
+      <div id="vedit-xml-context"
+           style="background:#faf7f2;border:1px solid var(--border);border-radius:3px;
+                  padding:.55rem .75rem;max-height:200px;overflow-y:auto;
+                  font-size:.88rem;line-height:1.9;font-family:'Cormorant Garamond',serif;
+                  color:var(--ink);cursor:text;user-select:text;word-break:break-all">—</div>
+      <div id="vedit-offset-info" style="font-size:.72rem;color:var(--muted);margin-top:.2rem"></div>
+    </div>
+    <div class="field">
+      <label>Selected Variant</label>
+      <input id="vedit-string" placeholder="…">
+    </div>
+    <div class="field">
+      <label>Note</label>
+      <input id="vedit-note" placeholder="Optional…">
+    </div>
+    <input type="hidden" id="vedit-id">
+    <input type="hidden" id="vedit-formula-id">
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeVeditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVedit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let activeElement      = null;
+let selection          = null;
+let tags               = [];
+let _allLoadedVariants = [];
+let treeDocs           = [];
+let linkedIds          = new Set();
+let filterRegions      = new Set();
+let filterSections     = new Set();
+let isDragging         = false;
+let dragData           = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function reloadCache() {
+  const btn = document.getElementById('reload-cache-btn');
+  btn.textContent = '↺ Reading…';
+  btn.disabled = true;
+  try {
+    const r = await api('/api/xml_cache_reload', 'POST');
+    toast(`Cache reloaded: ${r.eintraege} elements`);
+    await loadTree();
+  } catch (e) {
+    toast('Error reloading cache');
+  }
+  btn.textContent = '↺ XML Cache';
+  btn.disabled = false;
+}
+
+async function init() {
+  await loadTags();
+  await loadTree();
+}
+
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+// ── Tags ───────────────────────────────────────────────────────────────────
+async function loadTags() {
+  tags = await api('/api/tags');
+  if (document.getElementById('new-tag-widget')) renderTagWidget('new-tag-widget', []);
+}
+
+// ── File Tree ──────────────────────────────────────────────────────────────
+let treeSort = 'position';
+
+async function loadTree() {
+  document.getElementById('tree-spinner').style.display = 'inline-block';
+  const texts = await api('/api/xml_texte');
+  treeDocs    = await api('/api/xml_baum');
+  const statMap = Object.fromEntries(texts.map(t => [t.xmlid, t]));
+  treeDocs.forEach(d => d.elemente.forEach(e => {
+    const s = statMap[e.xmlid] || {};
+    e.verknuepft_pct   = s.verknuepft_pct   || 0;
+    e.anzahl_varianten = s.anzahl_varianten  || 0;
+  }));
+  linkedIds = new Set(texts.filter(t => t.anzahl_varianten > 0).map(t => t.xmlid));
+
+  const regions  = [...new Set(treeDocs.flatMap(d => d.elemente.map(e => e.tag_region)).filter(Boolean))].sort();
+  const sections = [...new Set(treeDocs.flatMap(d => d.elemente.map(e => e.tag_textteil)).filter(Boolean))].sort();
+  renderFacets('facet-region-row',  regions,  'region');
+  renderFacets('facet-section-row', sections, 'textteil');
+
+  renderTree();
+  document.getElementById('tree-spinner').style.display = 'none';
+}
+
+function renderFacets(containerId, values, type) {
+  const row = document.getElementById(containerId);
+  const labelText = type === 'region' ? 'Region' : 'Section';
+  const label = `<span class="facet-label">${labelText}</span>`;
+  if (!values.length) { row.innerHTML = label; return; }
+  const activeSet = type === 'region' ? filterRegions : filterSections;
+  row.innerHTML = label +
+    `<span class="facet-chip ${activeSet.size === 0 ? 'active-' + type : ''}" onclick="toggleFacet('${type}','__all__')">All</span>` +
+    values.map(v =>
+      `<span class="facet-chip ${activeSet.has(v) ? 'active-' + type : ''}" onclick="toggleFacet('${type}','${esc(v)}')">${esc(v)}</span>`
+    ).join('');
+}
+
+function toggleFacet(type, value) {
+  const s = type === 'region' ? filterRegions : filterSections;
+  if (value === '__all__') { s.clear(); }
+  else { if (s.has(value)) s.delete(value); else s.add(value); }
+  const regions  = [...new Set(treeDocs.flatMap(d => d.elemente.map(e => e.tag_region)).filter(Boolean))].sort();
+  const sections = [...new Set(treeDocs.flatMap(d => d.elemente.map(e => e.tag_textteil)).filter(Boolean))].sort();
+  renderFacets('facet-region-row',  regions,  'region');
+  renderFacets('facet-section-row', sections, 'textteil');
+  filterTree();
+}
+
+function treeSortLabel(s) {
+  if (s === 'position') return 'Document order';
+  if (s === 'xmlid') return 'ID';
+  if (s === 'alpha') return 'Alphabetically';
+  return 'Linked %';
+}
+
+async function refreshTreePct(xmlid) {
+  const texts = await api('/api/xml_texte');
+  const statMap = Object.fromEntries(texts.map(t => [t.xmlid, t]));
+  treeDocs.forEach(d => d.elemente.forEach(e => {
+    const s = statMap[e.xmlid] || {};
+    e.verknuepft_pct   = s.verknuepft_pct   || 0;
+    e.anzahl_varianten = s.anzahl_varianten  || 0;
+  }));
+  linkedIds = new Set(texts.filter(t => t.anzahl_varianten > 0).map(t => t.xmlid));
+  const item = xmlid ? document.getElementById(`ei-${xmlid}`) : null;
+  if (item) {
+    const pct      = statMap[xmlid]?.verknuepft_pct || 0;
+    const pctColor = pct === 0 ? 'var(--border)' : pct < 30 ? '#c8a000' : '#4a6741';
+    let badge = item.querySelector('.pct-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'pct-badge';
+      badge.style.cssText = `font-size:.6rem;font-family:'JetBrains Mono',monospace;margin-left:auto;flex-shrink:0`;
+      item.appendChild(badge);
+    }
+    badge.style.color = pctColor;
+    badge.textContent = `${pct}%`;
+    if (statMap[xmlid]?.anzahl_varianten > 0 && !item.querySelector('.linked-dot')) {
+      item.insertAdjacentHTML('beforeend', '<span class="linked-dot" title="linked"></span>');
+    }
+  }
+}
+
+function renderTree() {
+  const el = document.getElementById('tree-body');
+  if (!treeDocs.length) {
+    el.innerHTML = '<div style="padding:1rem;color:var(--muted);font-style:italic;font-size:.8rem">No XML files found.</div>';
+    return;
+  }
+
+  const sortBar = `<div style="position:sticky;top:0;z-index:10;padding:.35rem .7rem;border-bottom:1px solid var(--border);background:#f9f5ee;font-size:.68rem;display:flex;gap:.4rem;align-items:center">
+    <span style="color:var(--muted);text-transform:uppercase;letter-spacing:.08em">Sort</span>
+    ${['position','xmlid','alpha','pct'].map(s => `<button onclick="setTreeSort('${s}')" id="sort-btn-${s}"
+      style="padding:.1rem .38rem;border:1px solid var(--border);border-radius:3px;background:${treeSort===s?'var(--sienna)':'none'};color:${treeSort===s?'white':'var(--ink)'};cursor:pointer;font-family:inherit;font-size:.67rem">
+      ${treeSortLabel(s)}</button>`).join('')}
+  </div>`;
+
+  if (treeSort === 'position') {
+    treeDocs.forEach(doc => {
+      doc.elemente.sort((a, b) => (parseFloat(a.position) || 0) - (parseFloat(b.position) || 0));
+    });
+  }
+
+  el.innerHTML = sortBar + treeDocs.map((doc, di) => `
+    <div class="file-group">
+      <div class="file-head open" id="fh-${di}" onclick="toggleFileGroup(${di})">
+        <span class="toggle">▶</span><span>${esc(doc.datei)}</span>
+      </div>
+      <div class="elem-list open" id="fl-${di}">
+        ${doc.elemente.map(e => {
+          const pct = e.verknuepft_pct || 0;
+          const pctColor = pct === 0 ? 'var(--border)' : pct < 30 ? '#c8a000' : '#4a6741';
+          return `<div class="elem-item" id="ei-${esc(e.xmlid)}"
+               data-xmlid="${esc(e.xmlid)}" data-preview="${esc(e.preview)}"
+               data-region="${esc(e.tag_region||'')}" data-textteil="${esc(e.tag_textteil||'')}"
+               data-position="${Number(e.position) || 0}" data-pct="${pct}" onclick="loadElement('${esc(e.xmlid)}')">
+            <span class="elem-tag">${esc(e.xmlid)}</span>
+            <span class="elem-preview">${esc(e.preview)}</span>
+            <span class="pct-badge" style="font-size:.6rem;font-family:'JetBrains Mono',monospace;color:${pctColor};margin-left:auto;flex-shrink:0">${pct}%</span>
+            ${linkedIds.has(e.xmlid) ? '<span class="linked-dot" title="linked"></span>' : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+
+  filterTree();
+}
+
+function setTreeSort(s) { treeSort = s; renderTree(); filterTree(); }
+
+function toggleFileGroup(di) {
+  document.getElementById(`fh-${di}`)?.classList.toggle('open');
+  document.getElementById(`fl-${di}`)?.classList.toggle('open');
+}
+
+// ── Tree search & keyboard nav ─────────────────────────────────────────────
+let treeFocusIndex = -1;
+
+function getVisibleItems() {
+  return [...document.querySelectorAll('.elem-item:not(.hidden)')];
+}
+
+function setTreeFocus(index) {
+  document.querySelectorAll('.elem-item.keyboard-focus').forEach(el => el.classList.remove('keyboard-focus'));
+  const items = getVisibleItems();
+  if (index < 0 || index >= items.length) { treeFocusIndex = -1; return; }
+  treeFocusIndex = index;
+  items[index].classList.add('keyboard-focus');
+  items[index].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+document.addEventListener('keydown', (e) => {
+  const active = document.activeElement;
+  const inOtherInput = active &&
+    (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT') &&
+    active.id !== 'tree-search';
+  if (inOtherInput || document.querySelector('.overlay.open')) return;
+
+  const items = getVisibleItems();
+  if (!items.length) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    setTreeFocus(treeFocusIndex < 0 ? 0 : Math.min(treeFocusIndex + 1, items.length - 1));
+    if (items[treeFocusIndex]) items[treeFocusIndex].click();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    setTreeFocus(Math.max(treeFocusIndex - 1, 0));
+    if (items[treeFocusIndex]) items[treeFocusIndex].click();
+  } else if (e.key === 'Enter') {
+    if (treeFocusIndex >= 0 && items[treeFocusIndex]) { e.preventDefault(); items[treeFocusIndex].click(); }
+  } else if (e.key === 'Escape') {
+    document.getElementById('tree-search').value = '';
+    _fulltextMatchIds = null;
+    _fulltextSnippets = {};
+    document.getElementById('tree-search-hint').textContent = '';
+    filterTree();
+  }
+});
+
+document.getElementById('tree-body').addEventListener('click', (e) => {
+  const item = e.target.closest('.elem-item');
+  if (!item) return;
+  const items = getVisibleItems();
+  const idx = items.indexOf(item);
+  if (idx >= 0) {
+    treeFocusIndex = idx;
+    document.querySelectorAll('.elem-item.keyboard-focus').forEach(el => el.classList.remove('keyboard-focus'));
+    item.classList.add('keyboard-focus');
+  }
+});
+
+function treeSearchKey(e) { /* handled by global listener */ }
+
+function getSearchPattern() {
+  const raw = (document.getElementById('tree-search').value || '').trim();
+  if (!raw) return null;
+  const escaped = raw.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  try { return new RegExp(escaped, 'gi'); } catch (e) { return null; }
+}
+
+function highlightText(text, pattern) {
+  if (!pattern || !text) return esc(text);
+  try { pattern.lastIndex = 0; return esc(text).replace(pattern, m => `<mark>${m}</mark>`); }
+  catch (e) { return esc(text); }
+}
+
+function highlightInText(pattern) {
+  if (!pattern) return;
+  document.getElementById('text-body').querySelectorAll('.section-text').forEach(div => {
+    div.innerHTML = div.innerHTML.replace(
+      /(<[^>]*>)|([^<]+)/g,
+      (match, tag, text) => {
+        if (tag) return tag;
+        if (!text) return '';
+        pattern.lastIndex = 0;
+        return text.replace(pattern, m => `<mark class="search-hit">${m}</mark>`);
+      }
+    );
+  });
+  const first = document.getElementById('text-body').querySelector('mark.search-hit');
+  if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+// ── Fulltext tree search ───────────────────────────────────────────────────
+// xmlids that matched the last server fulltext search (null = no server search active)
+let _fulltextMatchIds = null;
+let _searchDebounceTimer = null;
+
+function onTreeSearchInput() {
+  clearTimeout(_searchDebounceTimer);
+  const raw = (document.getElementById('tree-search').value || '').trim();
+
+  if (!raw) {
+    // Reset: show everything
+    _fulltextMatchIds = null;
+    document.getElementById('tree-search-hint').textContent = '';
+    filterTree();
+    return;
+  }
+
+  // Run client-side filter immediately for instant feedback on xmlid/preview
+  filterTree();
+
+  // Debounce server search by 350ms
+  _searchDebounceTimer = setTimeout(() => _runFulltextSearch(raw), 350);
+}
+
+async function _runFulltextSearch(q) {
+  const spinner = document.getElementById('tree-search-spinner');
+  const hint    = document.getElementById('tree-search-hint');
+  spinner.style.display = 'inline-block';
+  hint.textContent = 'Searching…';
+  try {
+    const results = await api(`/api/xml_search?q=${encodeURIComponent(q)}`);
+    _fulltextMatchIds = new Set(results.map(r => r.xmlid));
+    // Also store snippets for tooltip / preview enrichment
+    _fulltextSnippets = Object.fromEntries(results.map(r => [r.xmlid, r.snippet]));
+    hint.textContent = results.length
+      ? `${results.length} text match${results.length !== 1 ? 'es' : ''}`
+      : 'No text matches';
+  } catch (e) {
+    _fulltextMatchIds = null;
+    _fulltextSnippets = {};
+    hint.textContent = '';
+  }
+  spinner.style.display = 'none';
+  filterTree();
+}
+
+let _fulltextSnippets = {};
+
+function filterTree() {
+  const pattern = getSearchPattern();
+  const raw     = (document.getElementById('tree-search').value || '').trim();
+  const hasFulltext = _fulltextMatchIds !== null;
+
+  document.querySelectorAll('.elem-item').forEach(item => {
+    const xmlid   = item.dataset.xmlid   || '';
+    const preview = item.dataset.preview || '';
+
+    // Client-side match: xmlid or preview
+    const clientMatch = !pattern
+      || (pattern.lastIndex = 0, pattern.test(xmlid))
+      || (pattern.lastIndex = 0, pattern.test(preview));
+
+    // Fulltext match from server (if available)
+    const fulltextMatch = !hasFulltext || _fulltextMatchIds.has(xmlid);
+
+    const matchSearch  = !raw || clientMatch || fulltextMatch;
+    const matchRegion  = filterRegions.size  === 0 || filterRegions.has(item.dataset.region);
+    const matchSection = filterSections.size === 0 || filterSections.has(item.dataset.textteil);
+    const visible = matchSearch && matchRegion && matchSection;
+    item.classList.toggle('hidden', !visible);
+
+    const previewEl = item.querySelector('.elem-preview');
+    if (previewEl) {
+      if (visible && hasFulltext && _fulltextMatchIds.has(xmlid) && _fulltextSnippets[xmlid]) {
+        // Show text snippet from fulltext search
+        const snip = _fulltextSnippets[xmlid];
+        if (pattern) {
+          pattern.lastIndex = 0;
+          previewEl.innerHTML = highlightText(snip, pattern);
+        } else {
+          previewEl.textContent = snip;
+        }
+      } else if (visible && pattern) {
+        pattern.lastIndex = 0;
+        previewEl.innerHTML = highlightText(preview, pattern);
+      } else {
+        previewEl.textContent = preview;
+      }
+    }
+
+    // Gold border for xmlid match, sienna for fulltext-only match
+    if (visible && raw) {
+      if (pattern) { pattern.lastIndex = 0; }
+      const xmlidHit = pattern && (pattern.lastIndex = 0, pattern.test(xmlid));
+      const textHit  = hasFulltext && _fulltextMatchIds.has(xmlid) && !xmlidHit;
+      item.style.borderLeftColor = xmlidHit ? 'var(--gold)' : textHit ? 'var(--sienna)' : '';
+    } else {
+      item.style.borderLeftColor = '';
+    }
+  });
+
+  document.querySelectorAll('.elem-list').forEach(list => {
+    const items = [...list.querySelectorAll('.elem-item:not(.hidden)')];
+    items.sort((a, b) => {
+      if (treeSort === 'position') {
+        return parseFloat(a.dataset.position || 0) - parseFloat(b.dataset.position || 0);
+      }
+      if (treeSort === 'alpha')    return (a.dataset.preview || '').localeCompare(b.dataset.preview || '');
+      if (treeSort === 'pct')      return parseFloat(b.dataset.pct || 0) - parseFloat(a.dataset.pct || 0);
+      return (a.dataset.xmlid || '').localeCompare(b.dataset.xmlid || '');
+    });
+    items.forEach(item => list.appendChild(item));
+  });
+
+  document.querySelectorAll('.file-group').forEach(g => {
+    g.style.display = g.querySelectorAll('.elem-item:not(.hidden)').length ? '' : 'none';
+  });
+
+  treeFocusIndex = -1;
+  document.querySelectorAll('.elem-item.keyboard-focus').forEach(el => el.classList.remove('keyboard-focus'));
+}
+
+// ── Helper ─────────────────────────────────────────────────────────────────
+function _docIdFromXmlId(xmlid) {
+  const m = xmlid.match(/^(.+?-\d+[A-Za-z]*)(?:_.*)?$/);
+  return m ? m[1] : xmlid;
+}
+
+// ── Load element ───────────────────────────────────────────────────────────
+async function loadElement(xmlid) {
+  document.querySelectorAll('.elem-item').forEach(e => e.classList.remove('active'));
+  document.getElementById(`ei-${xmlid}`)?.classList.add('active');
+  document.getElementById('text-body').innerHTML = '<div class="text-empty"><span class="spinner"></span></div>';
+  document.getElementById('text-head-wrap').innerHTML = '';
+  clearSuggestions();
+
+  const data = await api(`/api/xml_element?xmlid=${encodeURIComponent(xmlid)}`);
+  if (data.error) {
+    document.getElementById('text-body').innerHTML = `<div class="text-empty">Error: ${esc(data.error)}</div>`;
+    return;
+  }
+  activeElement = data;
+
+  const docId = _docIdFromXmlId(data.xmlid);
+  document.getElementById('text-head-wrap').innerHTML = `
+    <div class="text-head">
+      <a class="xmlid-link" href="/?xmlid_text=${encodeURIComponent(docId)}" title="Show in Text panel">${esc(data.xmlid)} ↗</a>
+      <span class="s-tag">${esc(data.tag)}</span>
+    </div>`;
+
+  document.getElementById('text-body').innerHTML = data.abschnitte.map(sec => `
+    <div class="section">
+      <div class="section-text" data-xmlid="${esc(sec.xmlid || xmlid)}"></div>
+    </div>`).join('');
+
+  document.getElementById('text-body').querySelectorAll('.section-text').forEach((div, i) => {
+    const sec = data.abschnitte[i];
+    const inner = sec.inner || '';
+    div.dataset.inner = inner;
+    renderSectionText(div, inner, sec.xmlid || xmlid, data.varianten);
+    _allLoadedVariants = data.varianten;
+  });
+
+  const pattern = getSearchPattern();
+  if (pattern) highlightInText(pattern);
+}
+
+function resolveOverlaps(hits) {
+  if (!hits.length) return [];
+  const pts = new Set();
+  hits.forEach(h => { pts.add(h.s); pts.add(h.e); });
+  const sorted = [...pts].sort((a, b) => a - b);
+  const segments = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const s = sorted[i], e = sorted[i + 1];
+    const covering = hits.filter(h => h.s <= s && h.e >= e);
+    if (covering.length) {
+      const primary = covering[0];
+      segments.push({ s, e, v: primary.v, overlaps: covering.length > 1, allVariants: covering.map(c => c.v) });
+    }
+  }
+  return segments;
+}
+
+function hexToRgba(hex, alpha) {
+  if (!hex) return null;
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function renderSectionText(div, inner, xmlid, variants) {
+  div.textContent = '';
+  const relevant = variants.filter(v => v.text_xmlid === xmlid);
+  const hits = [];
+  for (const v of relevant) {
+    let s, e;
+    if (v.offset_start != null && v.offset_end != null) { s = v.offset_start; e = v.offset_end; }
+    else if (v.string) { const idx = inner.indexOf(v.string); if (idx < 0) continue; s = idx; e = idx + v.string.length; }
+    else continue;
+    hits.push({ s, e, v, overlaps: !!v.overlaps });
+  }
+
+  const sel = resolveOverlaps(hits);
+  sel.sort((a, b) => a.s - b.s);
+
+  let i = 0;
+  for (const h of sel) {
+    const { s, e, v } = h;
+    if (i < s) div.appendChild(document.createTextNode(inner.slice(i, s)));
+    const span = document.createElement('span');
+    const color = v.tag_color || null;
+    span.className = 'linked-span' + (h.overlaps ? ' overlaps' : '');
+    if (color) {
+      span.style.background    = hexToRgba(color, 0.25);
+      span.style.borderBottom  = `2px solid ${hexToRgba(color, 0.7)}`;
+    }
+    span.title = v.formulierung + (v.kat_name ? ' [' + v.kat_name + ']' : '');
+    span.dataset.formulaId  = v.formula_id || v.ideal_id;
+    span.dataset.variantId  = v.id;
+    // legacy compat: also set ideal_id for old click handlers
+    span.dataset.idealId    = v.formula_id || v.ideal_id;
+    span.dataset.varianteId = v.id;
+    const tooltip = h.allVariants
+      ? h.allVariants.map(vv => vv.formulierung + (vv.kat_name ? ' [' + vv.kat_name + ']' : '')).join(' / ')
+      : v.formulierung + (v.kat_name ? ' [' + v.kat_name + ']' : '');
+    span.dataset.tooltip = tooltip;
+    if (h.allVariants && h.allVariants.length > 1) {
+      span.dataset.allVariantIds = h.allVariants.map(vv => vv.id).join(',');
+    }
+    span.textContent = inner.slice(s, e);
+    div.appendChild(span);
+    i = e;
+  }
+  if (i < inner.length) div.appendChild(document.createTextNode(inner.slice(i)));
+}
+
+// ── Text selection ─────────────────────────────────────────────────────────
+function selectionInfo(sel) {
+  if (!sel || sel.isCollapsed) return null;
+  try {
+    const range = sel.getRangeAt(0);
+    let node = range.startContainer;
+    let containerDiv = null;
+    while (node && node !== document.getElementById('text-body')) {
+      if (node.nodeType === 1 && node.classList?.contains('section-text')) { containerDiv = node; break; }
+      node = node.parentElement;
+    }
+    if (!containerDiv) return null;
+    const xmlid = containerDiv.dataset.xmlid || '';
+    const inner = containerDiv.dataset.inner || '';
+    if (!inner) return null;
+
+    function offsetAt(targetNode, targetOffset) {
+      const r = document.createRange();
+      r.setStart(containerDiv, 0); r.setEnd(targetNode, targetOffset);
+      return r.toString().length;
+    }
+    const start = offsetAt(range.startContainer, range.startOffset);
+    const end   = offsetAt(range.endContainer,   range.endOffset);
+    if (end <= start) return null;
+    const raw  = inner.slice(start, end);
+    const text = raw.trim();
+    if (!text || text.length < 2) return null;
+    const leading = raw.length - raw.trimStart().length;
+    return { text, xmlid, start: start + leading, end: start + leading + text.length };
+  } catch (e) {
+    console.error('selectionInfo:', e);
+    return null;
+  }
+}
+
+document.getElementById('text-body').addEventListener('click', (e) => {
+  const span = e.target.closest('.linked-span');
+  if (!span) return;
+  e.stopPropagation();
+  const allIds = span.dataset.allVariantIds ? span.dataset.allVariantIds.split(',').map(Number) : null;
+  if (allIds && allIds.length > 1) {
+    showOverlapPicker(span, allIds);
+  } else {
+    openFormulaDetail(parseInt(span.dataset.formulaId || span.dataset.idealId),
+                      span.dataset.variantId ? parseInt(span.dataset.variantId) : null);
+  }
+});
+
+function showOverlapPicker(span, variantIds) {
+  document.querySelectorAll('.overlap-picker').forEach(p => p.remove());
+  const picker = document.createElement('div');
+  picker.className = 'overlap-picker';
+  picker.innerHTML = '<div class="op-title">Overlapping Variants:</div>';
+  variantIds.forEach(vid => {
+    const v = (_allLoadedVariants || []).find(vv => vv.id === vid);
+    const label = v ? (v.formulierung || `Variant #${vid}`) : `Variant #${vid}`;
+    const btn = document.createElement('button');
+    btn.className = 'op-btn'; btn.textContent = label;
+    btn.onclick = () => { picker.remove(); if (v) openFormulaDetail(v.formula_id || v.ideal_id, vid); };
+    picker.appendChild(btn);
+  });
+  const rect = span.getBoundingClientRect();
+  picker.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.bottom+4}px;z-index:300`;
+  document.body.appendChild(picker);
+  setTimeout(() => document.addEventListener('click', () => picker.remove(), { once: true }), 10);
+}
+
+document.addEventListener('mouseup', (e) => {
+  if (isDragging) { endDrag(e); return; }
+  if (e.target.closest('.linked-span')) return;
+  if (e.target.closest('#suggestion-body')) return;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const textBody = document.getElementById('text-body');
+  if (!textBody.contains(sel.anchorNode)) return;
+  const info = selectionInfo(sel);
+  if (!info || info.text.length < 2) return;
+  selection = { text: info.text, xmlid: info.xmlid, start: info.start, end: info.end };
+  showSuggestions(info.text, info.xmlid);
+});
+
+// ── Suggestions ────────────────────────────────────────────────────────────
+async function showSuggestions(text, xmlid) {
+  const body = document.getElementById('suggestion-body');
+  body.innerHTML = `
+    <div class="suggestions-fixed-header">
+      <div class="selection-box" id="selection-box">
+        <div class="sel-label">↓ Drag Selection on Formula to Link Variant</div>
+        <div class="sel-text">${esc(text)}</div>
+      </div>
+    </div>
+    <div class="suggestion-list" id="suggestion-list">
+      <div class="suggestion-label">Searching…<span class="spinner" style="margin-left:.4rem"></span></div>
+    </div>`;
+  setupDrag(text, xmlid);
+  const suggestions = await api('/api/aehnliche_ideale', 'POST', { text });
+  renderSuggestions(suggestions, text, xmlid);
+}
+
+function renderSuggestions(suggestions, text, xmlid) {
+  const list = document.getElementById('suggestion-list');
+  if (!list) return;
+  let html = `
+    <div class="new-formula-zone" id="new-formula-zone">
+      <button class="new-btn" onclick="openNewFormulaModal()">Create New Formula or Link Manually</button>
+      <div class="new-hint">Drop selection or click</div>
+    </div>`;
+  if (suggestions.length) {
+    html += `<div class="suggestion-label" style="margin-top:.2rem">Similar Formulae</div>`;
+    html += suggestions.map(v => {
+      const variantCount = v.varianten_anzahl || v.anzahl_varianten || 0;
+      return `
+      <div class="formula-card suggestion-card" id="fc-${v.id}">
+        <div class="suggestion-card-head" onclick="openFormulaDetail(${v.id},null)" style="cursor:pointer" title="Show and Edit Formula and Variants">
+          <div class="suggestion-card-left">
+            <span class="suggestion-card-formula">${esc(v.formulierung)}</span>
+          </div>
+          <div class="suggestion-card-right">
+            <span class="suggestion-card-meta">
+              <span class="suggestion-card-score">${Math.round(v.score * 100)}%</span>
+              ${variantCount ? `<span class="suggestion-card-vk-count" title="${variantCount} linked variant(s)">${variantCount} ⇄</span>` : ''}
+            </span>
+            ${v.kat_name ? `<span class="suggestion-card-tag" ${v.tag_color ? `style="background:${v.tag_color};"` : ''}>${esc(v.kat_name)}</span>` : ''}
+          </div>
+        </div>
+        ${(v.tags_region || v.tags_textteil) ? `
+        <div style="padding:.08rem .58rem .32rem;display:flex;gap:.22rem;flex-wrap:wrap;">
+          <div style="display:flex;align-items: center;gap:.22rem;flex-wrap:wrap;">
+            ${(v.tags_region||'').split(',').filter(Boolean).map(t=>`<span style="font-size:.58rem;padding:.03rem .26rem;border-radius:10px;background:#ddecd6;color:#2d4a26">${esc(t)}</span>`).join('')}
+            ${(v.tags_textteil||'').split(',').filter(Boolean).map(t=>`<span style="font-size:.58rem;padding:.03rem .26rem;border-radius:10px;background:#e8e0f5;color:#3d2d6a">${esc(t)}</span>`).join('')}
+          </div>
+        </div>` : ''}
+        <div class="suggestion-card-drop-zone">Drop selection to link as variant</div>
+      </div>`;
+    }).join('');
+  } else {
+    html += `<div style="color:var(--muted);font-style:italic;font-size:.82rem;margin:.3rem 0 .5rem">No similar formulae found</div>`;
+  }
+  list.innerHTML = html;
+}
+
+function clearSuggestions() {
+  document.getElementById('suggestion-body').innerHTML =
+    '<div class="suggestion-empty">← Highlight text to<br>show formula suggestions</div>';
+  selection = null; dragData = null;
+}
+
+// ── Drag & drop ────────────────────────────────────────────────────────────
+function setupDrag(text, xmlid) {
+  dragData = { text, xmlid };
+  const chip = document.getElementById('drag-chip');
+  chip.textContent = text.length > 48 ? text.slice(0, 48) + '…' : text;
+  const box = document.getElementById('selection-box');
+  if (!box) return;
+  box.onmousedown = (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    chip.style.left = e.clientX + 14 + 'px';
+    chip.style.top  = e.clientY - 16 + 'px';
+    chip.style.display = 'block';
+    e.preventDefault();
+  };
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const chip = document.getElementById('drag-chip');
+  chip.style.left = e.clientX + 14 + 'px';
+  chip.style.top  = e.clientY - 16 + 'px';
+  document.querySelectorAll('.suggestion-card,.new-formula-zone').forEach(z => z.classList.remove('drag-over'));
+  document.elementFromPoint(e.clientX, e.clientY)?.closest('.suggestion-card,.new-formula-zone')?.classList.add('drag-over');
+});
+
+function endDrag(e) {
+  isDragging = false;
+  document.getElementById('drag-chip').style.display = 'none';
+  document.querySelectorAll('.suggestion-card,.new-formula-zone').forEach(z => z.classList.remove('drag-over'));
+  if (!dragData) return;
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  if (!under) return;
+  const card = under.closest('.suggestion-card');
+  if (card) { linkVariant(parseInt(card.id.replace('fc-', '')), dragData.text, dragData.xmlid, card); return; }
+  if (under.closest('.new-formula-zone')) openNewFormulaModal();
+}
+
+// ── Link variant ───────────────────────────────────────────────────────────
+async function linkVariant(formulaId, text, xmlid, cardEl) {
+  const payload = { ideal_id: formulaId, text_xmlid: xmlid, string: text };
+  if (selection && selection.xmlid === xmlid) {
+    payload.offset_start = selection.start;
+    payload.offset_end   = selection.end;
+  }
+  const result = await api('/api/varianten/bulk', 'POST', payload);
+  if (result.id) {
+    cardEl?.classList.add('success');
+    const tags = [result.tag_region, result.tag_textteil].filter(Boolean).join(' · ');
+    toast(`Variant linked ✓${tags ? '  [' + tags + ']' : ''}`);
+    linkedIds.add(xmlid);
+    const ei = document.getElementById(`ei-${xmlid}`);
+    if (ei && !ei.querySelector('.linked-dot'))
+      ei.insertAdjacentHTML('beforeend', '<span class="linked-dot" title="linked"></span>');
+    if (activeElement) { await loadElement(activeElement.xmlid); await refreshTreePct(activeElement.xmlid); }
+  } else {
+    toast('Error saving variant');
+  }
+}
+
+// ── Formula detail modal ───────────────────────────────────────────────────
+let _detailFormulaId = null;
+let _detailFormulaTags = [];
+let _detailFormulaVariantCount = 0;
+let _detailSortCol   = 'text_xmlid';
+let _detailSortDir   = 'asc';
+let _detailBulkMode = false;
+let _detailBulkSelected = new Set();
+let _detailBulkTargetFormulaId = null;
+let _detailBulkFormulaSearchTimeout = null;
+let _veditVid        = null;
+let _veditFormulaId  = null;
+
+function normalizeDetailFormulaTags(ideal) {
+  const ids = ideal.kategorie_ids || [];
+  return ids.map(id => {
+    const tag = tags.find(t => t.id === id);
+    return tag ? { name: tag.name, color: tag.color } : null;
+  }).filter(Boolean);
+}
+
+async function openFormulaDetail(formulaId, highlightVariantId) {
+  _detailFormulaId = formulaId;
+  _detailSortCol   = 'text_xmlid';
+  _detailSortDir   = 'asc';
+  const data = await api(`/api/ideale/${formulaId}/varianten`);
+  if (data.error) { toast('Error loading formula'); return; }
+
+  _detailFormulaTags = normalizeDetailFormulaTags(data.ideal);
+  _detailFormulaVariantCount = data.varianten ? data.varianten.length : 0;
+  renderDetailFormulaTags();
+  document.getElementById('detail-formula-text').textContent = data.ideal.formulierung;
+  document.getElementById('detail-edit-formula').value = data.ideal.formulierung || '';
+  document.getElementById('detail-edit-note').value    = data.ideal.notiz || '';
+  renderTagWidget('detail-tag-widget', data.ideal.kategorie_ids || []);
+  document.getElementById('detail-inline-edit-panel').style.display = 'none';
+  document.getElementById('detail-inline-edit-btn').textContent = '✎';
+
+  await renderDetailVariants(formulaId, highlightVariantId);
+  document.getElementById('detail-overlay').classList.add('open');
+
+  if (highlightVariantId) {
+    setTimeout(() => {
+      document.querySelector('.var-highlight')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }
+}
+
+function toggleFormulaInlineEdit() {
+  const panel = document.getElementById('detail-inline-edit-panel');
+  const btn   = document.getElementById('detail-inline-edit-btn');
+  const deleteBtn = document.getElementById('detail-delete-btn');
+  const open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  deleteBtn.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? '✎' : '✕ Cancel changes';
+}
+
+async function saveFormulaInlineEdit() {
+  const formulaId  = _detailFormulaId;
+  const formula    = document.getElementById('detail-edit-formula').value.trim();
+  const note       = document.getElementById('detail-edit-note').value.trim() || null;
+  const tag_ids    = tagWidgetGetSelected('detail-tag-widget');
+  if (!formula) { toast('Formula required'); return; }
+  const updated = await api(`/api/ideale/${formulaId}`, 'PUT', { formulierung: formula, notiz: note, kategorie_ids: tag_ids });
+  if (updated.error) { toast('Error saving'); return; }
+  document.getElementById('detail-formula-text').textContent = updated.formulierung;
+  _detailFormulaTags = normalizeDetailFormulaTags(updated);
+  renderDetailFormulaTags();
+  toggleFormulaInlineEdit();
+  toast('Formula saved');
+}
+
+async function deleteFormulaDetail() {
+  const formulaId = _detailFormulaId;
+  const formulaText = document.getElementById('detail-formula-text').textContent;
+  
+  const warnings = [];
+  if (_detailFormulaVariantCount > 0) {
+    warnings.push(`This formula has ${_detailFormulaVariantCount} linked variant(s) that will be deleted.`);
+  }
+  
+  const warningText = warnings.length > 0 ? '\n\n' + warnings.join('\n') : '';
+  
+  if (!confirm(`Delete formula "${formulaText}"?${warningText}\n\nThis action cannot be undone.`)) {
+    return;
+  }
+  
+  try {
+    await api(`/api/ideale/${formulaId}`, 'DELETE');
+    toast('Formula deleted');
+    closeDetailModal();
+    // Refresh the tree if open
+    if (activeElement && activeElement.xmlid) {
+      await loadElement(activeElement.xmlid);
+      await refreshTreePct(activeElement.xmlid);
+    }
+  } catch (e) {
+    console.error('Error deleting formula:', e);
+    toast(`Error deleting formula: ${e.message || e}`);
+  }
+}
+
+function renderDetailFormulaTags() {
+  const formulaHead = document.querySelector('.formula-head');
+  const formulaText = document.getElementById('detail-formula-text');
+  if (!formulaHead || !formulaText) return;
+
+  // Remove existing tag and count spans
+  formulaHead.querySelectorAll('.tag-badge, .var-count-badge').forEach(el => el.remove());
+
+  const actions = formulaHead.querySelector('.actions');
+
+  // Render count badge
+  if (_detailFormulaVariantCount > 0) {
+    const countSpan = document.createElement('span');
+    countSpan.className = 'var-count-badge';
+    countSpan.title = `${_detailFormulaVariantCount} linked variant(s)`;
+    countSpan.textContent = `${_detailFormulaVariantCount} ⇄`;
+    formulaHead.insertBefore(countSpan, actions);
+  }
+
+  // Render category tags
+  if (_detailFormulaTags.length === 0) {
+    const noTagsSpan = document.createElement('span');
+    noTagsSpan.style.fontSize = '.75rem';
+    noTagsSpan.style.color = '#999';
+    noTagsSpan.textContent = 'No tags';
+    formulaHead.insertBefore(noTagsSpan, actions);
+    return;
+  }
+
+  _detailFormulaTags.forEach(tag => {
+    const tagSpan = document.createElement('span');
+    tagSpan.className = 'tag-badge';
+    if (tag.color) {
+      tagSpan.style.background = tag.color;
+      tagSpan.style.color = 'white';
+      tagSpan.style.borderColor = tag.color;
+    }
+    tagSpan.textContent = esc(tag.name);
+    formulaHead.insertBefore(tagSpan, actions);
+  });
+}
+
+async function renderDetailVariants(formulaId, highlightVid) {
+  const vars = await api(`/api/varianten?ideal_id=${formulaId}`);
+  const wrap = document.getElementById('detail-variants-wrap');
+  if (!vars.length) {
+    wrap.innerHTML = '<p style="color:var(--muted);font-style:italic;font-size:.9rem;padding:.5rem 0">No variants recorded.</p>';
+    return;
+  }
+  const col = _detailSortCol, dir = _detailSortDir;
+  const sorted = [...vars].sort((a, b) => {
+    const av = (a[col] || '').toString().toLowerCase();
+    const bv = (b[col] || '').toString().toLowerCase();
+    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  function sortTh(label, c) {
+    const active = col === c, nextDir = (active && dir === 'asc') ? 'desc' : 'asc';
+    const arrow = active ? (dir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th style="cursor:pointer;user-select:none;white-space:nowrap"
+      onclick="detailSort('${c}','${nextDir}',${formulaId})">${label}${arrow}</th>`;
+  }
+  function statusLabel(s) { return s === 1 ? 'valid' : s === -1 ? 'invalid' : 'pending'; }
+
+  const bulk = _detailBulkMode;
+  wrap.innerHTML = `
+    <div class="detail-table-scroll">
+      <table class="var-table">
+        <thead><tr>
+          <th>Status</th>
+          ${sortTh('xml:id', 'text_xmlid')}
+          ${sortTh('Variant', 'string')}
+          <th>Note</th>
+          ${bulk ? '<th style="text-align:center">Select</th>' : ''}
+          <th></th>
+        </tr></thead>
+        <tbody>
+        ${sorted.map(v => `
+          <tr class="${v.id == highlightVid ? 'var-highlight' : ''}">
+            <td><span class="status-dot s${v.verifiziert || v.verified}" title="${statusLabel(v.verifiziert || v.verified)}"></span> ${statusLabel(v.verifiziert || v.verified)}</td>
+            <td>
+              <a class="xml-id" style="cursor:pointer;text-decoration:none;font-size:.7rem;color:var(--muted);margin-left:.25rem;" href="/?xmlid_text=${encodeURIComponent(v.text_xmlid)}" target="_blank" title="Show in Text panel">${esc(v.text_xmlid)} ↗</a>
+            </td>
+            <td class="var-string"><span style="cursor:pointer" onclick="jumpToVariant('${esc(v.text_xmlid)}')" title="Open in annotator">${esc(v.string)} ↗</span></td>
+            <td style="color:var(--muted);font-size:.85rem">${esc(v.notiz || '')}</td>
+            ${bulk ? `<td style="text-align:center"><input type="checkbox" class="bulk-select" onchange="detailToggleVariantSelection(${v.id})" ${_detailBulkSelected.has(v.id) ? 'checked' : ''}></td>` : ''}
+            <td style="white-space:nowrap">
+              <button class="btn btn-ghost btn-sm" onclick="openVeditModal(${v.id},${formulaId})" title="Edit Variant">✎</button>
+              <button class="btn btn-ghost btn-sm" onclick="detailVerify(${v.id},${formulaId})" title="Validate">↻</button>
+              <button class="btn btn-danger btn-sm" onclick="detailDelete(${v.id},${formulaId})" title="Delete">✕</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="bulk-actions">
+      ${bulk ? `<button class="btn btn-primary btn-sm" onclick="detailMoveSelectedVariants(${formulaId})" title="Move Selected Variants to Another Formula">Move Selection</button>` : ''}
+      <button class="btn btn-ghost btn-sm btn-bulk${bulk ? ' active' : ''}" onclick="toggleDetailBulkEdit()" title="${bulk ? 'Deactivate' : 'Activate'} Bulk Edit">${bulk ? 'Deactivate Bulk Edit' : 'Activate Bulk Edit'}</button>
+    </div>`;
+}
+
+async function detailSort(col, dir, formulaId) { _detailSortCol = col; _detailSortDir = dir; await renderDetailVariants(formulaId, null); }
+
+async function detailVerify(vid, formulaId) {
+  await api(`/api/varianten/${vid}/verifizieren`, 'POST');
+  await renderDetailVariants(formulaId, null);
+  toast('Validated');
+}
+
+async function detailDelete(vid, formulaId) {
+  if (!confirm('Delete variant?')) return;
+  await api(`/api/varianten/${vid}`, 'DELETE');
+  await renderDetailVariants(formulaId, null);
+  if (activeElement) { await loadElement(activeElement.xmlid); await refreshTreePct(activeElement.xmlid); }
+  toast('Variant deleted');
+}
+
+function toggleDetailBulkEdit() {
+  _detailBulkMode = !_detailBulkMode;
+  if (!_detailBulkMode) _detailBulkSelected.clear();
+  _detailBulkTargetFormulaId = null;
+  renderDetailVariants(_detailFormulaId, null);
+}
+
+function detailToggleVariantSelection(variantId) {
+  if (!_detailBulkMode) return;
+  if (_detailBulkSelected.has(variantId)) _detailBulkSelected.delete(variantId);
+  else _detailBulkSelected.add(variantId);
+}
+
+async function detailMoveSelectedVariants(formulaId) {
+  if (!_detailBulkSelected.size) {
+    toast('No variants selected');
+    return;
+  }
+  openDetailBulkMoveModal(formulaId, [..._detailBulkSelected]);
+}
+
+function openDetailBulkMoveModal(sourceFormulaId, selectedVariantIds) {
+  document.getElementById('detail-bulk-source-formula-id').value = sourceFormulaId;
+  document.getElementById('detail-bulk-selected-variants').value = JSON.stringify(selectedVariantIds);
+  document.getElementById('detail-bulk-move-count').textContent = `Moving ${selectedVariantIds.length} variant(s) from formula #${sourceFormulaId}`;
+
+  switchDetailBulkMoveMode('search');
+  document.getElementById('detail-bulk-formula-search').value = '';
+  document.getElementById('detail-bulk-formula-results').innerHTML = '';
+  document.getElementById('detail-bulk-new-formula-input').value = '';
+  document.getElementById('detail-bulk-new-note-input').value = '';
+  renderTagWidget('detail-bulk-new-tag-widget', []);
+  _detailBulkTargetFormulaId = null;
+  document.getElementById('detail-bulk-move-btn').disabled = true;
+
+  document.getElementById('detail-bulk-move-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('detail-bulk-formula-search').focus(), 50);
+}
+
+function closeDetailBulkMoveModal() {
+  document.getElementById('detail-bulk-move-overlay').classList.remove('open');
+  _detailBulkTargetFormulaId = null;
+}
+
+document.getElementById('detail-bulk-move-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeDetailBulkMoveModal(); });
+
+function switchDetailBulkMoveMode(mode) {
+  const searchMode = document.getElementById('detail-bulk-search-mode');
+  const newMode = document.getElementById('detail-bulk-new-mode');
+  const searchBtn = document.getElementById('detail-bulk-mode-search-btn');
+  const newBtn = document.getElementById('detail-bulk-mode-new-btn');
+  const moveBtn = document.getElementById('detail-bulk-move-btn');
+
+  if (mode === 'search') {
+    searchMode.style.display = 'block';
+    newMode.style.display = 'none';
+    searchBtn.classList.add('active');
+    newBtn.classList.remove('active');
+    moveBtn.textContent = 'Move Variants';
+    moveBtn.disabled = !_detailBulkSelected.size;
+    setTimeout(() => document.getElementById('detail-bulk-formula-search').focus(), 50);
+  } else {
+    searchMode.style.display = 'none';
+    newMode.style.display = 'block';
+    searchBtn.classList.remove('active');
+    newBtn.classList.add('active');
+    moveBtn.textContent = 'Create Formula & Move';
+    moveBtn.disabled = false;
+    setTimeout(() => document.getElementById('detail-bulk-new-formula-input').focus(), 50);
+  }
+}
+
+async function searchDetailBulkFormulae() {
+  const query = document.getElementById('detail-bulk-formula-search').value.trim();
+  const resultsEl = document.getElementById('detail-bulk-formula-results');
+  if (!query) {
+    resultsEl.innerHTML = '';
+    _detailBulkTargetFormulaId = null;
+    document.getElementById('detail-bulk-move-btn').disabled = true;
+    return;
+  }
+
+  clearTimeout(_detailBulkFormulaSearchTimeout);
+  _detailBulkFormulaSearchTimeout = setTimeout(async () => {
+    try {
+      resultsEl.innerHTML = '<div class="formula-search-empty"><span class="spinner"></span></div>';
+      if (!allFormulae.length) {
+        allFormulae = await api('/api/ideale');
+      }
+      const queryLower = query.toLowerCase();
+      const matches = allFormulae.filter(f => f.formulierung.toLowerCase().includes(queryLower)).slice(0, 50);
+      if (!matches.length) {
+        resultsEl.innerHTML = '<div class="formula-search-empty">No formulae found</div>';
+        _detailBulkTargetFormulaId = null;
+        document.getElementById('detail-bulk-move-btn').disabled = true;
+        return;
+      }
+      resultsEl.innerHTML = matches.map(f => {
+        const tag = tags.find(t => f.kategorie_ids?.includes(t.id));
+        const katName = tag?.name || '';
+        const katColor = tag?.color || '';
+        return `
+          <div class="formula-result-card" onclick="selectDetailBulkFormula(${f.id}, this)">
+            <div class="formula-head">
+              <span class="formula-text">${esc(f.formulierung)}</span>
+              ${katName ? `<span class="tag-badge" ${katColor ? `style=\"background:${katColor};\"` : ''}>${esc(katName)}</span>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      resultsEl.innerHTML = '<div class="formula-search-empty">Error loading formulae</div>';
+      console.error(e);
+    }
+  }, 300);
+}
+
+function selectDetailBulkFormula(formulaId, cardEl) {
+  _detailBulkTargetFormulaId = formulaId;
+  document.querySelectorAll('#detail-bulk-formula-results .formula-result-card').forEach(card => card.classList.remove('selected'));
+  if (cardEl) cardEl.classList.add('selected');
+  document.getElementById('detail-bulk-move-btn').disabled = false;
+}
+
+async function confirmDetailBulkMove() {
+  const sourceFormulaId = parseInt(document.getElementById('detail-bulk-source-formula-id').value);
+  const selectedVariantIds = JSON.parse(document.getElementById('detail-bulk-selected-variants').value);
+  const mode = document.getElementById('detail-bulk-mode-search-btn').classList.contains('active') ? 'search' : 'new';
+  let targetFormulaId;
+
+  if (mode === 'search') {
+    if (!_detailBulkTargetFormulaId) {
+      toast('Please select a target formula');
+      return;
+    }
+    targetFormulaId = _detailBulkTargetFormulaId;
+    if (sourceFormulaId === targetFormulaId) {
+      toast('Cannot move to the same formula');
+      return;
+    }
+    if (!confirm(`Move ${selectedVariantIds.length} variant(s) to formula #${targetFormulaId}?`)) return;
+  } else {
+    const formula = document.getElementById('detail-bulk-new-formula-input').value.trim();
+    if (!formula) {
+      toast('Formula required');
+      return;
+    }
+    const tagIds = tagWidgetGetSelected('detail-bulk-new-tag-widget');
+    const note = document.getElementById('detail-bulk-new-note-input').value.trim() || null;
+    if (!confirm(`Create new formula and move ${selectedVariantIds.length} variant(s)?`)) return;
+    try {
+      const f = await api('/api/ideale', 'POST', { formulierung: formula, kategorie_ids: tagIds, notiz: note });
+      targetFormulaId = f.id;
+    } catch (e) {
+      console.error('Error creating formula:', e);
+      toast(`Error creating formula: ${e.message || e}`);
+      return;
+    }
+  }
+
+  try {
+    for (const vid of selectedVariantIds) {
+      await api(`/api/varianten/${vid}`, 'PUT', { ideal_id: targetFormulaId });
+    }
+    toast(`Moved ${selectedVariantIds.length} variant(s)`);
+    _detailBulkMode = false;
+    _detailBulkSelected.clear();
+    _detailBulkTargetFormulaId = null;
+    await renderDetailVariants(sourceFormulaId, null);
+    closeDetailBulkMoveModal();
+    if (activeElement) { await loadElement(activeElement.xmlid); await refreshTreePct(activeElement.xmlid); }
+  } catch (e) {
+    console.error('Error moving variants:', e);
+    toast(`Error moving variants: ${e.message || e}`);
+  }
+}
+
+function jumpToVariant(xmlid) { closeDetailModal(); loadElement(xmlid); }
+function closeDetailModal() { document.getElementById('detail-overlay').classList.remove('open'); }
+document.getElementById('detail-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeDetailModal(); });
+
+// ── Edit variant modal ─────────────────────────────────────────────────────
+function _renderVeditContext(ctx, inner, string, offsetStart, offsetEnd) {
+  ctx.dataset.inner       = inner;
+  ctx.dataset.offsetStart = offsetStart ?? '';
+  ctx.dataset.offsetEnd   = offsetEnd   ?? '';
+  ctx.textContent = '';
+  if (!inner) { ctx.textContent = '(no XML context available)'; return; }
+  let start = (offsetStart != null && offsetEnd != null && inner.slice(offsetStart, offsetEnd) === string)
+    ? offsetStart : inner.indexOf(string || '');
+  if (start < 0 || !string) { ctx.appendChild(document.createTextNode(inner)); return; }
+  const end = start + string.length;
+  ctx.appendChild(document.createTextNode(inner.slice(0, start)));
+  const mark = document.createElement('mark');
+  mark.style.cssText = 'background:#fff0c0;border-radius:2px;cursor:text';
+  mark.textContent = inner.slice(start, end);
+  ctx.appendChild(mark);
+  ctx.appendChild(document.createTextNode(inner.slice(end)));
+}
+
+function _updateVeditOffsetInfo(os, oe, string, infoId) {
+  const el = document.getElementById(infoId);
+  if (!el) return;
+  el.textContent = (os != null && oe != null)
+    ? `Offset ${os}–${oe} · "${string}"`
+    : 'No offset stored – select text in the context above to set position.';
+}
+
+async function openVeditModal(vid, formulaId) {
+  _veditVid = vid; _veditFormulaId = formulaId;
+  const data = await api(`/api/varianten/${vid}`);
+  if (data.error) { toast('Error loading variant'); return; }
+  document.getElementById('vedit-string').value    = data.string || '';
+  document.getElementById('vedit-note').value      = data.notiz  || '';
+  const ctx = document.getElementById('vedit-xml-context');
+  ctx.dataset.xmlid = data.text_xmlid || '';
+  _renderVeditContext(ctx, data.xml_inner || '', data.string, data.offset_start, data.offset_end);
+  _updateVeditOffsetInfo(data.offset_start, data.offset_end, data.string, 'vedit-offset-info');
+  document.getElementById('vedit-overlay').classList.add('open');
+}
+
+document.getElementById('vedit-xml-context').addEventListener('mouseup', () => {
+  const ctx   = document.getElementById('vedit-xml-context');
+  const inner = ctx.dataset.inner || '';
+  if (!inner) return;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!ctx.contains(range.commonAncestorContainer)) return;
+  function ctxOffset(targetNode, targetOffset) {
+    const r = document.createRange(); r.setStart(ctx, 0); r.setEnd(targetNode, targetOffset);
+    return r.toString().length;
+  }
+  const start = ctxOffset(range.startContainer, range.startOffset);
+  const end   = ctxOffset(range.endContainer,   range.endOffset);
+  if (end <= start) return;
+  const raw  = inner.slice(start, end);
+  const text = raw.trim();
+  if (!text || text.length < 1) return;
+  const leading   = raw.length - raw.trimStart().length;
+  const trimStart = start + leading;
+  const trimEnd   = trimStart + text.length;
+  document.getElementById('vedit-string').value = text;
+  ctx.dataset.offsetStart = trimStart;
+  ctx.dataset.offsetEnd   = trimEnd;
+  _renderVeditContext(ctx, inner, text, trimStart, trimEnd);
+  _updateVeditOffsetInfo(trimStart, trimEnd, text, 'vedit-offset-info');
+  sel.removeAllRanges();
+});
+
+async function saveVedit() {
+  const vid       = _veditVid;
+  const formulaId = _veditFormulaId;
+  const string    = document.getElementById('vedit-string').value.trim();
+  const note      = document.getElementById('vedit-note').value.trim() || null;
+  if (!string) { toast('Variant string must not be empty'); return; }
+  const ctx = document.getElementById('vedit-xml-context');
+  const os  = ctx.dataset.offsetStart !== '' ? parseInt(ctx.dataset.offsetStart) : null;
+  const oe  = ctx.dataset.offsetEnd   !== '' ? parseInt(ctx.dataset.offsetEnd)   : null;
+  const current   = await api(`/api/varianten/${vid}`);
+  const payload   = { ideal_id: current.formula_id, text_xmlid: current.text_xmlid, string, notiz: note };
+  if (os != null) { payload.offset_start = os; payload.offset_end = oe; }
+  await api(`/api/varianten/${vid}`, 'PUT', payload);
+  closeVeditModal();
+  await renderDetailVariants(formulaId, vid);
+  if (activeElement) { await loadElement(activeElement.xmlid); await refreshTreePct(activeElement.xmlid); }
+  toast('Variant saved');
+}
+
+function closeVeditModal() { document.getElementById('vedit-overlay').classList.remove('open'); }
+document.getElementById('vedit-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeVeditModal(); });
+
+// ── Tag multi-widget ───────────────────────────────────────────────────────
+function renderTagWidget(containerId, selectedIds = []) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="tag-chips-display" id="${containerId}-chips"></div>
+    <div class="tag-add-row">
+      <input id="${containerId}-input" class="tag-add-input" placeholder="Search or create tag…" autocomplete="off">
+      <button class="btn btn-ghost btn-sm" onclick="tagWidgetAdd('${containerId}')">+</button>
+    </div>
+    <div id="${containerId}-suggestions" class="tag-suggestions"></div>`;
+  el.dataset.selected = JSON.stringify(selectedIds);
+  renderTagChips(containerId);
+  const inp = document.getElementById(`${containerId}-input`);
+  inp.addEventListener('input', () => tagWidgetSuggest(containerId));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); tagWidgetAdd(containerId); }
+    if (e.key === 'Escape') document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+  });
+}
+
+// ── Tag colour picker ──────────────────────────────────────────────────────
+const TAG_COLORS = [
+  null,
+  '#e05050','#e08830','#d4c030','#50c050','#3090d0','#8050d0','#d050a0',
+  '#f5a0a0','#f5c890','#f5f090','#a0e0a0','#90c8f5','#c8a8f5','#f5a8e0',
+  '#8b2020','#8b5a10','#8b8000','#206020','#10508b','#50208b','#8b1060',
+];
+
+function openColorPicker(tagId, btn, context) {
+  document.querySelectorAll('.color-popover').forEach(p => p.remove());
+  const tag = tags.find(t => t.id === tagId);
+  const current = tag?.color || null;
+
+  const pop = document.createElement('div');
+  pop.className = 'color-popover';
+  TAG_COLORS.forEach(c => {
+    const sw = document.createElement('span');
+    sw.className = 'color-swatch' + (c === current ? ' selected' : '');
+    sw.style.background = c || '#e8e0d4';
+    sw.title = c || 'None (clear)';
+    if (!c) sw.innerHTML = '<span style="font-size:9px;line-height:18px;display:block;text-align:center;color:#999">✕</span>';
+    sw.onclick = async (e) => {
+      e.stopPropagation();
+      await api(`/api/tags/${tagId}/color`, 'PATCH', { color: c });
+      if (tag) tag.color = c;
+      // Alle sichtbaren Widgets neu rendern
+      document.querySelectorAll('.tag-multi-widget').forEach(w => {
+        if (w.id) renderTagChips(w.id);
+      });
+      pop.remove();
+      toast('Colour updated');
+    };
+    pop.appendChild(sw);
+  });
+  const rect = btn.getBoundingClientRect();
+  pop.style.top  = (rect.bottom + 4) + 'px';
+  pop.style.left = Math.max(4, rect.left - 60) + 'px';
+  document.body.appendChild(pop);
+  setTimeout(() => {
+    document.addEventListener('click', function h(e) {
+      if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', h); }
+    });
+  }, 0);
+}
+
+function renderTagChips(containerId) {
+  const el = document.getElementById(containerId);
+  const selected = JSON.parse(el.dataset.selected || '[]');
+  const chipsEl = document.getElementById(`${containerId}-chips`);
+  if (!selected.length) { chipsEl.innerHTML = '<span style="color:var(--muted);font-size:.78rem;font-style:italic">No tags</span>'; return; }
+  chipsEl.innerHTML = selected.map(id => {
+    const t = tags.find(t => t.id === id);
+    if (!t) return '';
+    const dot = `<span class="tag-color-btn" style="background:${t.color||'var(--border)'}" title="Change colour" onclick="event.stopPropagation();openColorPicker(${t.id},this,'widget-${containerId}')"></span>`;
+    return `<span class="tag-chip-item">${dot}${esc(t.name)}<button onclick="tagWidgetRemove('${containerId}',${id})" title="Remove">✕</button></span>`;
+  }).join('');
+}
+
+function tagWidgetGetSelected(containerId) {
+  return JSON.parse(document.getElementById(containerId)?.dataset.selected || '[]');
+}
+
+function tagWidgetSetSelected(containerId, ids) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.dataset.selected = JSON.stringify(ids);
+  renderTagChips(containerId);
+}
+
+function tagWidgetRemove(containerId, id) {
+  tagWidgetSetSelected(containerId, tagWidgetGetSelected(containerId).filter(x => x !== id));
+}
+
+function tagWidgetSuggest(containerId) {
+  const q     = document.getElementById(`${containerId}-input`).value.trim().toLowerCase();
+  const sugEl = document.getElementById(`${containerId}-suggestions`);
+  if (!q) { sugEl.innerHTML = ''; return; }
+  const current = tagWidgetGetSelected(containerId);
+  const matches = tags.filter(t => t.name.toLowerCase().includes(q) && !current.includes(t.id));
+  sugEl.innerHTML = matches.map(t =>
+    `<div class="tag-sug-item" onclick="tagWidgetSelect('${containerId}',${t.id})">${esc(t.name)}</div>`
+  ).join('');
+}
+
+async function tagWidgetAdd(containerId) {
+  const inp  = document.getElementById(`${containerId}-input`);
+  const name = inp.value.trim();
+  if (!name) return;
+  let t = tags.find(t => t.name.toLowerCase() === name.toLowerCase());
+  if (!t) {
+    t    = await api('/api/kategorien', 'POST', { name });
+    tags = await api('/api/kategorien');
+  }
+  const current = tagWidgetGetSelected(containerId);
+  if (!current.includes(t.id)) tagWidgetSetSelected(containerId, [...current, t.id]);
+  inp.value = '';
+  document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+}
+
+function tagWidgetSelect(containerId, id) {
+  const current = tagWidgetGetSelected(containerId);
+  if (!current.includes(id)) tagWidgetSetSelected(containerId, [...current, id]);
+  document.getElementById(`${containerId}-input`).value = '';
+  document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+}
+
+// ── New formula modal ──────────────────────────────────────────────────────
+let formulaSearchTimeout = null;
+let allFormulae = [];
+
+function openNewFormulaModal() {
+  if (!selection && !dragData) return;
+  const { text, xmlid } = selection || dragData;
+  document.getElementById('new-var-text').textContent = text;
+  document.getElementById('new-xmlid').value = xmlid;
+  document.getElementById('selected-formula-id').value = '';
+  
+  // Reset to search mode
+  switchFormulaMode('search');
+  document.getElementById('formula-search-input').value = '';
+  document.getElementById('formula-search-results').innerHTML = '';
+  
+  // Reset new mode fields
+  document.getElementById('new-formula-input').value = text.slice(0, 80);
+  document.getElementById('new-note-input').value = '';
+  renderTagWidget('new-tag-widget', []);
+  
+  // clearSuggestions(); // Clear the suggestions panel
+  
+  document.getElementById('new-formula-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('formula-search-input').focus(), 50);
+}
+
+function closeNewFormulaModal() { 
+  document.getElementById('new-formula-overlay').classList.remove('open');
+  clearSuggestions();
+  isDragging = false;
+}
+
+function switchFormulaMode(mode) {
+  const searchMode = document.getElementById('search-mode');
+  const newMode = document.getElementById('new-mode');
+  const searchBtn = document.getElementById('mode-search-btn');
+  const newBtn = document.getElementById('mode-new-btn');
+  const saveBtn = document.getElementById('save-formula-btn');
+  
+  if (mode === 'search') {
+    searchMode.style.display = 'block';
+    newMode.style.display = 'none';
+    searchBtn.classList.add('active');
+    newBtn.classList.remove('active');
+    saveBtn.textContent = 'Link Variant';
+    setTimeout(() => document.getElementById('formula-search-input').focus(), 50);
+  } else {
+    searchMode.style.display = 'none';
+    newMode.style.display = 'block';
+    searchBtn.classList.remove('active');
+    newBtn.classList.add('active');
+    saveBtn.textContent = 'Create Formula & Link Variant';
+    setTimeout(() => document.getElementById('new-formula-input').focus(), 50);
+  }
+}
+
+async function searchFormulae() {
+  const query = document.getElementById('formula-search-input').value.trim();
+  const resultsEl = document.getElementById('formula-search-results');
+  
+  if (!query) {
+    resultsEl.innerHTML = '';
+    return;
+  }
+  
+  clearTimeout(formulaSearchTimeout);
+  formulaSearchTimeout = setTimeout(async () => {
+    try {
+      resultsEl.innerHTML = '<div class="formula-search-empty"><span class="spinner"></span></div>';
+      
+      // Fetch all formulae if not cached
+      if (!allFormulae.length) {
+        allFormulae = await api('/api/ideale');
+      }
+      
+      // Search in formulae
+      const queryLower = query.toLowerCase();
+      const matches = allFormulae.filter(f => 
+        f.formulierung.toLowerCase().includes(queryLower)
+      ).slice(0, 50); // Limit to 50 results
+      
+      if (matches.length === 0) {
+        resultsEl.innerHTML = '<div class="formula-search-empty">No formulae found</div>';
+        return;
+      }
+      
+      resultsEl.innerHTML = matches.map(f => {
+        const tag = tags.find(t => f.kategorie_ids?.includes(t.id));
+        const katName = tag?.name || '';
+        const katColor = tag?.color || '';
+        const variantCount = f.varianten_anzahl || f.anzahl_varianten || 0;
+        return `
+          <div class="formula-result-card" onclick="selectFormula(${f.id})">
+            <div class="formula-head">
+              <span class="formula-text">${esc(f.formulierung)}</span>
+              ${katName ? `<span class="tag-badge" ${katColor ? `style="background:${katColor};"` : ''}>${esc(katName)}</span>` : ''}
+              ${variantCount ? `<span class="var-count-badge" title="${variantCount} linked variant(s)">${variantCount} ⇄</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      resultsEl.innerHTML = '<div class="formula-search-empty">Error loading formulae</div>';
+      console.error(e);
+    }
+  }, 300);
+}
+
+function selectFormula(formulaId) {
+  document.getElementById('selected-formula-id').value = formulaId;
+  document.querySelectorAll('.formula-result-card').forEach(item => item.classList.remove('selected'));
+  event.target.closest('.formula-result-card').classList.add('selected');
+}
+
+async function saveFormulaLink() {
+  const mode = document.getElementById('mode-search-btn').classList.contains('active') ? 'search' : 'new';
+  const xmlid = document.getElementById('new-xmlid').value;
+  const varText = document.getElementById('new-var-text').textContent;
+  
+  let formulaId;
+  
+  if (mode === 'search') {
+    // Link to existing formula
+    formulaId = document.getElementById('selected-formula-id').value;
+    if (!formulaId) {
+      toast('Please select a formula');
+      return;
+    }
+  } else {
+    // Create new formula
+    const formula = document.getElementById('new-formula-input').value.trim();
+    if (!formula) {
+      toast('Formula required');
+      return;
+    }
+    const tagIds = tagWidgetGetSelected('new-tag-widget');
+    const note = document.getElementById('new-note-input').value.trim() || null;
+    
+    const f = await api('/api/ideale', 'POST', { formulierung: formula, kategorie_ids: tagIds, notiz: note });
+    formulaId = f.id;
+    allFormulae = []; // Clear cache to refresh
+  }
+  
+  // Create variant link
+  const payload = { ideal_id: parseInt(formulaId), text_xmlid: xmlid, string: varText };
+  if (selection && selection.xmlid === xmlid) {
+    payload.offset_start = selection.start;
+    payload.offset_end = selection.end;
+  }
+  
+  const result = await api('/api/varianten/bulk', 'POST', payload);
+  closeNewFormulaModal();
+  
+  const tagStr = [result.tag_region, result.tag_textteil].filter(Boolean).join(' · ');
+  toast(`Variant linked ✓${tagStr ? '  [' + tagStr + ']' : ''}`);
+  
+  linkedIds.add(xmlid);
+  if (activeElement) {
+    await loadElement(activeElement.xmlid);
+    await refreshTreePct(activeElement.xmlid);
+  }
+}
+
+async function saveNewFormula() {
+  // This function is kept for backward compatibility but redirects to saveFormulaLink
+  await saveFormulaLink();
+}
+
+document.getElementById('new-formula-overlay').addEventListener('click', e => { if (e.target === e.currentTarget) closeNewFormulaModal(); });
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+init().then(async () => {
+  try {
+    const inv  = await api('/api/varianten/invalidiert');
+    const link = document.getElementById('inv-link');
+    if (link && inv.length > 0) {
+      link.textContent = `⚠ ${inv.length} invalid`;
+      link.style.color = '#e07070'; link.style.borderColor = '#e07070';
+    } else if (link) {
+      link.textContent = '✓ All valid';
+      link.style.color = '#6aaa60'; link.style.borderColor = '#6aaa60';
+    }
+  } catch (e) {}
+  const params = new URLSearchParams(location.search);
+  const xmlid  = params.get('xmlid');
+  if (xmlid) { loadElement(xmlid); history.replaceState({}, '', '/annotate'); }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invalid Variants · FACT</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header>
+  <a href="/">← Editor</a>
+  <h1>Invalid Variants</h1>
+  <span class="sub">Variants that no longer match the text after an XML update</span>
+  <button id="recheck-btn" class="btn btn-ghost" onclick="reverifyAll()"
+    style="margin-left:auto;font-size:.82rem;border-color:#4a4035;color:var(--border)">
+    ↺ Re-check
+  </button>
+</header>
+
+<div class="container">
+  <div class="status-bar" id="status-bar"><span class="spinner"></span></div>
+
+  <div class="filter-bar">
+    <input id="filter-input" placeholder="Search formula, variant string, xml:id…"
+           oninput="filterTable()">
+    <button class="btn btn-ghost btn-sm" onclick="clearFilter()">✕ Reset</button>
+    <span id="filter-count" style="font-size:.8rem;color:var(--muted);margin-left:.3rem"></span>
+  </div>
+
+  <div id="table-container">
+    <div style="text-align:center;padding:2rem"><span class="spinner"></span></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let allVariants = [];
+let sortKey = 'text_xmlid';
+let sortAsc  = true;
+
+async function init() {
+  await loadStats();
+  await loadVariants();
+}
+
+async function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+// ── Statistics ─────────────────────────────────────────────────────────────
+async function loadStats() {
+  const [inv, all] = await Promise.all([
+    api('/api/variants/invalid'),
+    api('/api/variants')
+  ]);
+  const nInv  = inv.length;
+  const nOk   = all.filter(v => v.verified === 1).length;
+  const nNew  = all.filter(v => v.verified === 0).length;
+  const nAll  = all.length;
+
+  document.getElementById('status-bar').innerHTML = `
+    <div class="status-item">
+      <span class="status-num num-bad">${nInv}</span>
+      <span class="status-label">Invalid</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-item">
+      <span class="status-num num-ok">${nOk}</span>
+      <span class="status-label">Valid</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-item">
+      <span class="status-num num-new">${nNew}</span>
+      <span class="status-label">Unchecked</span>
+    </div>
+    <div class="status-divider"></div>
+    <div class="status-item">
+      <span class="status-num">${nAll}</span>
+      <span class="status-label">Total</span>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:.5rem;align-items:center">
+      ${nInv > 0
+        ? `<span style="font-size:.82rem;color:var(--rust)">
+             ⚠ ${nInv} variant${nInv !== 1 ? 's' : ''} no longer match the current XML.
+           </span>`
+        : `<span style="font-size:.82rem;color:var(--sage)">
+             ✓ All variants are valid.
+           </span>`}
+    </div>`;
+}
+
+// ── Load variants ──────────────────────────────────────────────────────────
+async function loadVariants() {
+  allVariants = await api('/api/variants/invalid');
+  filterTable();
+}
+
+// ── Render table ───────────────────────────────────────────────────────────
+function renderTable(rows) {
+  const container = document.getElementById('table-container');
+
+  if (!rows.length) {
+    container.innerHTML = `
+      <div class="empty">
+        <span class="empty-icon">✓</span>
+        No invalid variants found.${allVariants.length === 0
+          ? '<br><span style="font-size:.88rem">All variants match the current XML.</span>'
+          : ''}
+      </div>`;
+    return;
+  }
+
+  rows = [...rows].sort((a, b) => {
+    let va = a[sortKey] ?? '', vb = b[sortKey] ?? '';
+    if (typeof va === 'string') va = va.toLowerCase();
+    if (typeof vb === 'string') vb = vb.toLowerCase();
+    return sortAsc ? (va < vb ? -1 : va > vb ? 1 : 0)
+                   : (va > vb ? -1 : va < vb ? 1 : 0);
+  });
+
+  const th = (key, label) => `
+    <th onclick="setSort('${key}')" class="${sortKey === key ? 'sorted' : ''}">
+      ${label}<span class="sort-arrow">${sortKey === key ? (sortAsc ? '↑' : '↓') : '↕'}</span>
+    </th>`;
+
+  container.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          ${th('text_xmlid', 'xml:id')}
+          ${th('formulierung', 'Formula')}
+          ${th('kat_name', 'Tag')}
+          ${th('string', 'Stored String')}
+          <th>Current Text at Position</th>
+          <th>Actions</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map(v => renderRow(v)).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function renderRow(v) {
+  const hasOffset = v.offset_start != null && v.offset_end != null;
+  return `
+    <tr id="row-${v.id}">
+      <td>
+        <div class="mono">${esc(v.text_xmlid)}</div>
+        <div style="margin-top:.2rem">
+          ${hasOffset
+            ? `<span class="chip chip-bad">Offset ${v.offset_start}–${v.offset_end} invalid</span>`
+            : `<span class="chip chip-new">No offset (legacy)</span>`}
+        </div>
+      </td>
+      <td class="italic">${esc(v.formulierung)}</td>
+      <td class="muted">${esc(v.kat_name || '—')}</td>
+      <td>
+        <div class="italic">${esc(v.string)}</div>
+        ${v.string_xml
+          ? `<div style="margin-top:.25rem;font-size:.72rem;font-family:'JetBrains Mono',monospace;
+                         color:var(--muted);background:#f5f0e8;padding:.15rem .35rem;
+                         border-radius:2px;word-break:break-all">${esc(v.string_xml)}</div>`
+          : ''}
+      </td>
+      <td id="ctx-${v.id}">
+        <button class="btn btn-ghost btn-sm"
+          onclick="loadContext(${v.id}, '${esc(v.text_xmlid)}', ${v.offset_start}, ${v.offset_end})">
+          Show
+        </button>
+      </td>
+      <td class="action-cell">
+        <a href="/annotate?xmlid=${esc(v.text_xmlid)}"
+           class="btn btn-primary btn-sm" target="_blank"
+           title="Open in annotation editor">✎ Re-link</a>
+        <button class="btn btn-danger btn-sm" onclick="deleteVariant(${v.id})"
+                title="Delete variant">✕</button>
+      </td>
+    </tr>`;
+}
+
+// ── Load context ───────────────────────────────────────────────────────────
+async function loadContext(vid, xmlid, offsetStart, offsetEnd) {
+  const cell = document.getElementById(`ctx-${vid}`);
+  cell.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    const data = await api(`/api/xml_element?xmlid=${encodeURIComponent(xmlid)}`);
+    if (data.error) { cell.innerHTML = `<span style="color:var(--rust)">Not found</span>`; return; }
+
+    const section = data.abschnitte.find(a => a.xmlid === xmlid) || data.abschnitte[0];
+    if (!section) { cell.innerHTML = `<span style="color:var(--muted)">—</span>`; return; }
+
+    const pt = section.inner || '';
+    if (offsetStart == null || offsetEnd == null) {
+      cell.innerHTML = `<span style="font-style:italic;color:var(--muted)">${esc(pt.slice(0, 120))}${pt.length > 120 ? '…' : ''}</span>`;
+      return;
+    }
+
+    const ctx    = 40;
+    const s      = Math.max(0, offsetStart - ctx);
+    const e      = Math.min(pt.length, offsetEnd + ctx);
+    const before = pt.slice(s, offsetStart);
+    const at     = pt.slice(offsetStart, Math.min(offsetEnd, pt.length));
+    const after  = pt.slice(Math.min(offsetEnd, pt.length), e);
+    const valid  = offsetEnd <= pt.length && at.length > 0;
+
+    cell.innerHTML = `
+      <div style="font-size:.82rem;line-height:1.6;max-width:320px">
+        ${s > 0 ? '…' : ''}${esc(before)}<span style="background:${valid ? '#b8deb0' : '#fdecea'};border-radius:2px;padding:0 2px">${esc(at) || '<empty>'}</span>${esc(after)}${e < pt.length ? '…' : ''}
+      </div>
+      <div style="margin-top:.25rem;font-size:.7rem;color:var(--muted)">
+        Length: ${pt.length} chars · Offset: ${offsetStart}–${offsetEnd}
+        ${offsetEnd > pt.length ? `<span style="color:var(--rust)"> (out of range!)</span>` : ''}
+      </div>`;
+  } catch (e) {
+    cell.innerHTML = `<span style="color:var(--rust)">Error: ${esc(e.message)}</span>`;
+  }
+}
+
+// ── Filter ─────────────────────────────────────────────────────────────────
+function filterTable() {
+  const q = (document.getElementById('filter-input').value || '').toLowerCase().trim();
+  const filtered = q
+    ? allVariants.filter(v =>
+        (v.text_xmlid   || '').toLowerCase().includes(q) ||
+        (v.formulierung || '').toLowerCase().includes(q) ||
+        (v.string       || '').toLowerCase().includes(q) ||
+        (v.kat_name     || '').toLowerCase().includes(q)
+      )
+    : allVariants;
+
+  const countEl = document.getElementById('filter-count');
+  countEl.textContent = q
+    ? `${filtered.length} of ${allVariants.length}`
+    : `${allVariants.length} entries`;
+  renderTable(filtered);
+}
+
+function clearFilter() {
+  document.getElementById('filter-input').value = '';
+  filterTable();
+}
+
+// ── Sort ───────────────────────────────────────────────────────────────────
+function setSort(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  filterTable();
+}
+
+// ── Delete ─────────────────────────────────────────────────────────────────
+async function deleteVariant(id) {
+  if (!confirm('Delete variant?')) return;
+  await api(`/api/variants/${id}`, 'DELETE');
+  allVariants = allVariants.filter(v => v.id !== id);
+  filterTable();
+  await loadStats();
+  toast('Variant deleted');
+}
+
+// ── Re-verify all ──────────────────────────────────────────────────────────
+async function reverifyAll() {
+  const btn = document.getElementById('recheck-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Checking…';
+  try {
+    const r = await api('/api/variants/reverify', 'POST');
+    toast(`Check complete: ${r.gueltig} valid, ${r.invalidiert} invalid`);
+    await loadStats();
+    await loadVariants();
+  } catch (e) {
+    toast('Error during re-check');
+  }
+  btn.disabled = false;
+  btn.innerHTML = '↺ Re-check';
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+init();
+</script>
+</body>
+</html>

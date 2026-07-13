@@ -1,0 +1,1940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FACT - Formulaic Language Annotation and Classification Tool</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+
+<!-- Body -->
+<body>
+<div class="shell">
+  <header>
+    <h1>FACT</h1>
+    <span class="sub">Formulaic Language Annotation and Classification Tool</span>
+    <div class="header-actions">
+      <a href="/annotate" class="header-btn" title="Open Annotation and Linking Editor">⇄ Annotate &amp; Link</a>
+      <a href="/import" class="header-btn" title="Import files">↑ Import</a>
+      <a href="/invalid" target="_blank" id="inv-link" class="header-btn" title="Show invalid variants">⚠ Validation pending</a>
+      <button onclick="reloadCache()" id="reload-cache-btn" class="header-btn" title="Reload XML cache">↺ XML Cache</button>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <aside>
+    <h2>View</h2>
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="showPanel('panel-formulae')">Formulae &amp; Variants</button>
+      <button class="nav-tab" onclick="showPanel('panel-texte')">Texts</button>
+    </div>
+
+    <h2>Tags</h2>
+    <div class="tag-list" id="tag-list"></div>
+    <div class="add-tag">
+      <input id="new-tag-input" placeholder="New Tag..." onkeydown="if(event.key==='Enter')addTag()">
+      <button onclick="addTag()">+</button>
+    </div>
+
+    <div class="filter-section">
+      <h2>Regions<button onclick="openRegionsModal()" class="inline-btn">✎</button></h2>
+      <div class="tag-chips" id="tag-chips-region"></div>
+    </div>
+
+    <div class="filter-section">
+      <h2>Diplomatic Section</h2>
+      <div class="tag-chips" id="tag-chips-section"></div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main>
+    <!-- Panel: Formulae -->
+    <div class="panel active" id="panel-formulae">
+      <div class="toolbar">
+        <h2 id="panel-formulae-title">Formulae &amp; Variants</h2>
+        <div class="search-wrap">
+          <input id="formula-search" placeholder="Search…" oninput="renderFormulae()">
+        </div>
+        <button class="btn btn-primary" onclick="openFormulaModal()">+ New Formula</button>
+      </div>
+      <!-- Export / sort bar -->
+      <div class="export-bar">
+        <div class="sort-toggle" title="Toggle sort order">
+          <button id="sort-btn-alpha"   class="sort-btn active" onclick="setSortMode('alpha')">A–Z</button>
+          <button id="sort-btn-variants" class="sort-btn"       onclick="setSortMode('variants')">⇄ desc</button>
+        </div>
+        <span id="formulae-count" class="formulae-count"></span>
+        <div class="flex-spacer"></div>
+        <button class="btn btn-ghost btn-sm" onclick="selectVisibleFormulae()" title="Add all currently visible formulae to selection">+ Select visible</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearSelection()" title="Remove all from selection">✕ Deselect all</button>
+        <button class="btn btn-primary btn-sm" onclick="exportSelectedCSV()" title="Export selected formulae as CSV">↓ Export CSV</button>
+      </div>
+      <div id="formulae-list"></div>
+    </div>
+
+    <!-- Panel: Texts -->
+    <div class="panel" id="panel-texte">
+      <div class="toolbar">
+        <h2>Texts</h2>
+        <span id="text-count" class="formulae-count"></span>
+        <div class="search-wrap">
+          <input id="text-search" placeholder="Search xml:id…" oninput="renderTextsGrid()">
+        </div>
+      </div>
+      <div id="texte-grid" class="text-grid"></div>
+    </div>
+
+    <!-- Panel: Text-Detail -->
+    <div class="panel" id="panel-text-detail">
+      <div class="text-detail-header">
+        <button class="back-link" onclick="showPanel('panel-texte')">← back to list</button>
+        <div class="detail-position-counter" id="detail-position-counter"></div>
+      </div>
+      <div class="formula-card">
+        <div class="formula-head">
+          <span class="xmlid-label" id="text-detail-title"></span>
+          <span class="doc-summary" id="text-detail-summary"></span>
+        </div>
+        <div class="formula-body">
+          <div id="text-detail-list"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal: Edit formula -->
+<div class="overlay" id="formula-overlay">
+  <div class="modal">
+    <h3 id="modal-title">New Formula</h3>
+    <input type="hidden" id="edit-formula-id">
+    <div class="field">
+      <label>Formula</label>
+      <input id="edit-formula-text" placeholder="Canonical formula…">
+    </div>
+    <div class="field">
+      <label>Tags</label>
+      <div id="edit-tag-widget" class="tag-multi-widget"></div>
+    </div>
+    <div class="field">
+      <label>Note</label>
+      <textarea id="edit-note" placeholder="Optional note…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeFormulaModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveFormula()">Save</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Modal: Manage regions -->
+<div class="overlay" id="regions-overlay">
+  <div class="modal">
+    <h3>Edit Regions</h3>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:1rem">Abbreviation (3 letters) → Full name. New regions are recognised automatically once xml:ids with a new abbreviation are saved.</p>
+    <div id="regions-list"></div>
+    <div class="region-row" style="margin-top:.75rem">
+      <input id="new-region-abbr" placeholder="Abbr. (e.g. Köl)" maxlength="3" style="max-width:80px">
+      <input id="new-region-name" placeholder="Full name (e.g. Cologne)" onkeydown="if(event.key==='Enter')addRegion()">
+      <button class="btn btn-primary btn-sm" onclick="addRegion()">+ Add</button>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeRegionsModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Bulk move variants -->
+<div class="overlay" id="bulk-move-overlay">
+  <div class="modal">
+    <h3>Move Variants to Another Formula</h3>
+    <p id="bulk-move-count" style="font-size:.85rem;color:var(--muted);margin-bottom:1rem"></p>
+    
+    <!-- Mode toggle -->
+    <div class="field">
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="mode-search-btn" onclick="switchFormulaMode('search')">Move to existing Formula</button>
+        <button class="mode-btn" id="mode-new-btn" onclick="switchFormulaMode('new')">Create New Formula</button>
+      </div>
+    </div>
+
+    <!-- Search mode -->
+    <div id="search-mode" class="formula-mode">
+      <div class="field">
+        <label>Search Target Formula</label>
+        <input id="bulk-formula-search" placeholder="Search by formula text…" oninput="searchBulkFormulae()">
+      </div>
+      <div id="bulk-formula-results" class="formula-search-results"></div>
+    </div>
+
+    <!-- New mode -->
+    <div id="new-mode" class="formula-mode" style="display:none">
+      <div class="field">
+        <label>Formula</label>
+        <input id="new-formula-input" placeholder="New formula…">
+      </div>
+      <div class="field">
+        <label>Tags</label>
+        <div id="new-tag-widget" class="tag-multi-widget" style="font-size:.85rem"></div>
+      </div>
+      <div class="field">
+        <label>Note</label>
+        <input id="new-note-input" placeholder="Optional…">
+      </div>
+    </div>
+
+    <input type="hidden" id="bulk-source-formula-id">
+    <input type="hidden" id="bulk-selected-variants">
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeBulkMoveModal()">Cancel</button>
+      <button class="btn btn-primary" id="bulk-move-btn" onclick="confirmBulkMove()" disabled>Move Variants</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit single variant -->
+<div class="overlay" id="variant-overlay">
+  <div class="modal modal-large">
+    <h3>Edit Variant</h3>
+    <div class="field">
+      <label>Formula</label>
+      <div id="vedit-formula-text" style="font-style:italic;color:var(--sienna);margin-bottom:.9rem;font-size:.95rem"></div>
+    </div>
+
+    <div class="field">
+      <label>xml:id</label>
+      <input id="vedit-xmlid" class="readonly-input" placeholder="xml:id…" readonly>
+    </div>
+
+    <!-- XML context: select text to update variant -->
+    <div class="field">
+      <label>Select Text to update Variant
+        <span id="vedit-file" style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--muted);text-transform:none;letter-spacing:0"></span>
+      </label>
+      <div id="vedit-xml-context" class="xml-context">—</div>
+      <div id="vedit-offset-info" class="offset-info"></div>
+    </div>
+
+    <div class="field">
+      <label>Selected Variant</label>
+      <input id="vedit-string" placeholder="…">
+    </div>
+    <div class="field">
+      <label>Note</label>
+      <input id="vedit-note" placeholder="Optional…">
+    </div>
+    <input type="hidden" id="vedit-id">
+    <input type="hidden" id="vedit-formula-id">
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeVariantModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveVariant()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let tags = [];
+let formulae = [];
+let xmlIds = [];
+let activeTags = new Map(); // tag id -> 1 include, -1 exclude
+let filterRegions   = new Map(); // region -> 1 include, -1 exclude
+let filterSections  = new Map(); // section -> 1 include, -1 exclude
+
+// Export selection: Set of formula IDs
+let selectedFormulaIds = new Set();
+
+// Bulk edit mode: formulaId -> Set of selected variant IDs
+let bulkEditMode = {};
+
+// Sort mode: 'alpha' | 'variants'
+let formulaeSortMode = 'alpha';
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function reloadCache() {
+  const btn = document.getElementById('reload-cache-btn');
+  btn.textContent = '↺ Reading XML…';
+  btn.disabled = true;
+  try {
+    const r = await api('/api/xml_cache_reload', 'POST');
+    toast(`Cache reloaded: ${r.eintraege} elements`);
+  } catch(e) {
+    toast('Error reloading cache');
+  }
+  btn.textContent = '↺ XML Cache';
+  btn.disabled = false;
+}
+
+async function init() {
+  await loadTags();
+  await loadXmlIds();
+  await loadFormulae();
+  await loadTexts();
+  await loadFilterTags();
+}
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+let currentPanel = null;
+
+function showPanel(id) {
+
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  if (id === 'panel-formulae') {
+    document.querySelectorAll('.nav-tab')[0].classList.add('active');
+  } else if (id === 'panel-texte' || id === 'panel-text-detail') {
+    document.querySelectorAll('.nav-tab')[1].classList.add('active');
+  }
+
+  currentPanel = id;
+
+  // Wichtig: Panel immer neu rendern (Filter werden angewandt)
+  refreshActivePanel();
+}
+
+function refreshActivePanel() {
+
+  if (!currentPanel) {
+    showPanel('panel-formulae');
+    return;
+  }
+
+  if (currentPanel === 'panel-formulae') {
+    renderFormulae();
+  }
+  else if (currentPanel === 'panel-texte') {
+    renderTextsGrid();
+  }
+}
+
+function updateView() {
+  // 1. Tag-Liste rendern
+  renderTagList();
+
+  // 2. Filter für Region/Textteil anwenden
+  loadFilterTags();
+
+  // 3. Aktuelles Panel rendern
+  if (currentPanel === 'panel-formulae') renderFormulae();
+  else if (currentPanel === 'panel-texte') renderTextsGrid();
+}
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function api(path, method='GET', body=null) {
+  const opts = { method, headers: {'Content-Type':'application/json'} };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(path, opts);
+  
+  // Check if response is OK
+  if (!r.ok) {
+    const text = await r.text();
+    console.error(`API Error ${r.status}:`, text);
+    throw new Error(`API Error ${r.status}: ${text}`);
+  }
+  
+  // Try to parse JSON
+  try {
+    return await r.json();
+  } catch (e) {
+    const text = await r.text();
+    console.error('JSON Parse Error:', e, 'Response:', text);
+    throw new Error(`JSON Parse Error: ${e.message}`);
+  }
+}
+
+// ── Filter tags (region / section chips) ──────────────────────────────────
+async function loadFilterTags() {
+  const data = await api('/api/filter_tags');
+  renderTagChips('tag-chips-region',  data.regionen,  'region');
+  renderTagChips('tag-chips-section', data.textteile, 'section');
+}
+
+function renderTagChips(containerId, values, type) {
+  const el = document.getElementById(containerId);
+  if (!values.length) { el.innerHTML = '<span style="font-size:.75rem;color:var(--muted);font-style:italic">–</span>'; return; }
+  const activeMap = type === 'region' ? filterRegions : filterSections;
+  const allActive = activeMap.size === 0;
+  el.innerHTML = `<span class="tag-chip tag-all ${allActive?'active-'+type:''}" onclick="filterTagAll('${type}','all')">All</span>` +
+    values.map(v => {
+      const state = activeMap.get(v) || 0;
+      const classes = state === 1 ? `active-${type}` : state === -1 ? `excluded-${type}` : '';
+      const title = state === 1
+        ? 'Left-click to clear, right-click to exclude'
+        : state === -1
+        ? 'Right-click to clear, left-click to include'
+        : 'Left-click to include, right-click to exclude';
+      return `<span class="tag-chip ${classes}" title="${title}" onclick="filterTag('${type}','${esc(v)}')" oncontextmenu="filterTagExclude(event,'${type}','${esc(v)}')">${esc(v)}</span>`;
+    }).join('');
+}
+
+function matchesFacetFilters(values, filterMap) {
+  if (!filterMap || filterMap.size === 0) return true;
+  const list = Array.isArray(values) ? values : [];
+  const hasValue = val => val === '__none__' ? list.length === 0 : list.includes(val);
+  const includeValues = [];
+  const excludeValues = [];
+  for (const [value, state] of filterMap.entries()) {
+    if (state === 1) includeValues.push(value);
+    else if (state === -1) excludeValues.push(value);
+  }
+  if (includeValues.length) {
+    if (!includeValues.some(hasValue)) return false;
+  }
+  if (excludeValues.length) {
+    if (excludeValues.some(hasValue)) return false;
+  }
+  return true;
+}
+
+function filterTagAll(type, mode) {
+  if (type === 'region') {
+    if (mode === 'all') {
+      filterRegions.clear();
+    } else {
+      filterRegions.clear();
+      filterRegions.set('__none__', 1);
+    }
+  } else {
+    if (mode === 'all') {
+      filterSections.clear();
+    } else {
+      filterSections.clear();
+      filterSections.set('__none__', 1);
+    }
+  }
+  if (!currentPanel) currentPanel = 'panel-formulae';
+  updateView();
+}
+
+function filterTag(type, value) {
+  const m = type === 'region' ? filterRegions : filterSections;
+  const current = m.get(value) || 0;
+  if (current === 1) {
+    m.delete(value);
+  } else {
+    m.set(value, 1);
+  }
+  if (!currentPanel) currentPanel = 'panel-formulae';
+  updateView();
+}
+
+function filterTagExclude(event, type, value) {
+  event.preventDefault();
+  const m = type === 'region' ? filterRegions : filterSections;
+  const current = m.get(value) || 0;
+  if (current === -1) {
+    m.delete(value);
+  } else {
+    m.set(value, -1);
+  }
+  if (!currentPanel) currentPanel = 'panel-formulae';
+  updateView();
+}
+
+// Regions modal
+async function openRegionsModal() {
+  await renderRegionsList();
+  document.getElementById('regions-overlay').classList.add('open');
+}
+function closeRegionsModal() {
+  document.getElementById('regions-overlay').classList.remove('open');
+  loadFilterTags();
+}
+async function renderRegionsList() {
+  const regionen = await api('/api/regionen');
+  const el = document.getElementById('regions-list');
+  el.innerHTML = regionen.map(r => `
+    <div class="region-row">
+      <input value="${esc(r.kuerzel)}" maxlength="3" style="max-width:80px" readonly>
+      <input value="${esc(r.name)}" onchange="updateRegion('${esc(r.kuerzel)}',this.value)">
+    </div>`).join('') || '<p style="color:var(--muted);font-size:.85rem">No regions defined yet.</p>';
+}
+async function addRegion() {
+  const k = document.getElementById('new-region-abbr').value.trim();
+  const n = document.getElementById('new-region-name').value.trim();
+  if (!k || !n) { toast('Abbreviation and name required'); return; }
+  await api('/api/regionen', 'POST', {kuerzel: k, name: n});
+  document.getElementById('new-region-abbr').value = '';
+  document.getElementById('new-region-name').value = '';
+  await renderRegionsList();
+  toast('Region saved');
+}
+async function updateRegion(kuerzel, name) {
+  await api('/api/regionen', 'POST', {kuerzel, name});
+  toast('Updated');
+}
+document.getElementById('regions-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeRegionsModal();
+});
+
+// ── Tags (sidebar list) ────────────────────────────────────────────────────
+async function loadTags() {
+  tags = await api('/api/kategorien');
+  renderTagList();
+  renderTagSelect();
+}
+
+function renderTagList() {
+  const el = document.getElementById('tag-list');
+  // scrollbar ab 10 Tags (ohne "All"-Eintrag)
+  el.classList.toggle('scrollable', tags.length >= 10);
+  const none = activeTags.size === 0;
+  let html = `
+    <div class="tag-item ${none?'active':''}" onclick="filterByTag('ALL')" title="Show all">
+      <span class="tag-dot"></span><span>All</span>
+    </div>`;
+  for (const t of tags) {
+    const state = activeTags.get(t.id) || 0;
+    const active = state === 1;
+    const excluded = state === -1;
+    const swatchBg = t.color || 'var(--border)';
+    const title = active
+      ? 'Left-click to clear include, right-click to exclude'
+      : excluded
+      ? 'Right-click to clear exclude, left-click to include'
+      : 'Left-click to include, right-click to exclude';
+    html += `<div class="tag-item ${active?'active':''} ${excluded?'excluded':''}" id="tag-item-${t.id}"
+                onclick="filterByTag(${t.id})"
+                oncontextmenu="filterTagExcludeTag(event,${t.id})"
+                title="${title}">
+      <span class="tag-dot" style="${active?'background:var(--sienna)':''}"></span>
+      <span>${esc(t.name)}</span>
+      <span class="tag-color-btn" title="Set highlight colour"
+            style="background:${swatchBg}"
+            onclick="event.stopPropagation();openColorPicker(${t.id},this,'sidebar')"></span>
+      <span class="tag-actions">
+        <button onclick="event.stopPropagation();renameTag(${t.id},'${esc(t.name)}')">✎</button>
+        <button onclick="event.stopPropagation();deleteTag(${t.id})">✕</button>
+      </span>
+    </div>`;
+  }
+  el.innerHTML = html;
+}
+
+// ── Tag colour picker ──────────────────────────────────────────────────────
+const TAG_COLORS = [
+  null,        // "no colour" (clear)
+  '#e05050', '#e08830', '#d4c030', '#50c050', '#3090d0', '#8050d0', '#d050a0',
+  '#f5a0a0', '#f5c890', '#f5f090', '#a0e0a0', '#90c8f5', '#c8a8f5', '#f5a8e0',
+  '#8b2020', '#8b5a10', '#8b8000', '#206020', '#10508b', '#50208b', '#8b1060',
+];
+
+let _colorPickerId = null;
+
+function openColorPicker(tagId, btn, context) {
+  // Close any existing popover
+  document.querySelectorAll('.color-popover').forEach(p => p.remove());
+  _colorPickerId = tagId;
+
+  const tag = tags.find(t => t.id === tagId);
+  const current = tag?.color || null;
+
+  const pop = document.createElement('div');
+  pop.className = 'color-popover';
+
+  TAG_COLORS.forEach(c => {
+    const sw = document.createElement('span');
+    sw.className = 'color-swatch' + (c === current ? ' selected' : '');
+    sw.style.background = c || '#e8e0d4';
+    sw.title = c || 'None (clear)';
+    if (!c) sw.innerHTML = '<span style="font-size:9px;line-height:18px;display:block;text-align:center;color:#999">✕</span>';
+    sw.onclick = async (e) => {
+      e.stopPropagation();
+      await api(`/api/tags/${tagId}/color`, 'PATCH', { color: c });
+      const t = tags.find(t => t.id === tagId);
+      if (t) t.color = c;
+      renderTagList();
+      // Aktualisiere alle sichtbaren Widget-Chips
+      document.querySelectorAll('.tag-multi-widget').forEach(w => {
+        if (w.id) renderTagChipItems(w.id);
+      });
+      // Aktualisiere formula-cards
+      renderFormulae();
+      pop.remove();
+      toast('Colour updated');
+    };
+    pop.appendChild(sw);
+  });
+
+  // Position relative to button
+  const rect = btn.getBoundingClientRect();
+  pop.style.position = 'fixed';
+  pop.style.top  = (rect.bottom + 4) + 'px';
+  pop.style.left = Math.max(4, rect.left - 60) + 'px';
+  document.body.appendChild(pop);
+
+  // Close on click outside
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e) {
+      if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', handler); }
+    });
+  }, 0);
+}
+
+function renderTagWidget(containerId, selectedIds=[]) {
+  // Renders a multi-select tag widget + inline-add into container
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="tag-chips-display" id="${containerId}-tags"></div>
+    <div class="tag-add-row">
+      <input id="${containerId}-input" class="tag-add-input" placeholder="New or existing tag…" autocomplete="off">
+      <button class="btn btn-ghost btn-sm" onclick="tagWidgetAdd('${containerId}')">+</button>
+    </div>
+    <div id="${containerId}-suggestions" class="tag-suggestions"></div>`;
+  el.dataset.selected = JSON.stringify(selectedIds);
+  renderTagChipItems(containerId);
+  const inp = document.getElementById(`${containerId}-input`);
+  inp.addEventListener('input', () => tagWidgetSuggest(containerId));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); tagWidgetAdd(containerId); }
+    if (e.key === 'Escape') document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+  });
+}
+
+function renderTagChipItems(containerId) {
+  const el = document.getElementById(containerId);
+  const selected = JSON.parse(el.dataset.selected || '[]');
+  const tagsEl = document.getElementById(`${containerId}-tags`);
+  if (!selected.length) { tagsEl.innerHTML = '<span style="color:var(--muted);font-size:.8rem;font-style:italic">No tags</span>'; return; }
+  tagsEl.innerHTML = selected.map(id => {
+    const t = tags.find(t => t.id === id);
+    if (!t) return '';
+    const dot = t.color
+      ? `<span class="tag-color-btn" style="background:${t.color};width:10px;height:10px;margin-right:.15rem" title="Change colour" onclick="event.stopPropagation();openColorPicker(${t.id},this,'widget-${containerId}')"></span>`
+      : `<span class="tag-color-btn" style="background:var(--border);width:10px;height:10px;margin-right:.15rem" title="Set colour" onclick="event.stopPropagation();openColorPicker(${t.id},this,'widget-${containerId}')"></span>`;
+    return `<span class="tag-chip-item">${dot}${esc(t.name)}<button onclick="tagWidgetRemove('${containerId}',${id})" title="Remove">✕</button></span>`;
+  }).join('');
+}
+
+function tagWidgetGetSelected(containerId) {
+  const el = document.getElementById(containerId);
+  return JSON.parse(el.dataset.selected || '[]');
+}
+
+function tagWidgetSetSelected(containerId, ids) {
+  const el = document.getElementById(containerId);
+  el.dataset.selected = JSON.stringify(ids);
+  renderTagChipItems(containerId);
+}
+
+function tagWidgetRemove(containerId, id) {
+  const current = tagWidgetGetSelected(containerId);
+  tagWidgetSetSelected(containerId, current.filter(x => x !== id));
+}
+
+function tagWidgetSuggest(containerId) {
+  const q = document.getElementById(`${containerId}-input`).value.trim().toLowerCase();
+  const sugEl = document.getElementById(`${containerId}-suggestions`);
+  if (!q) { sugEl.innerHTML = ''; return; }
+  const current = tagWidgetGetSelected(containerId);
+  const matches = tags.filter(t => t.name.toLowerCase().includes(q) && !current.includes(t.id));
+  sugEl.innerHTML = matches.map(t =>
+    `<div class="tag-sug-item" onclick="tagWidgetSelect('${containerId}',${t.id})">${esc(t.name)}</div>`
+  ).join('') || '';
+}
+
+async function tagWidgetAdd(containerId) {
+  const inp = document.getElementById(`${containerId}-input`);
+  const name = inp.value.trim();
+  if (!name) return;
+  // Existing?
+  let t = tags.find(t => t.name.toLowerCase() === name.toLowerCase());
+  if (!t) {
+    t = await api('/api/kategorien', 'POST', {name});
+    await loadTags();
+  }
+  const current = tagWidgetGetSelected(containerId);
+  if (!current.includes(t.id)) tagWidgetSetSelected(containerId, [...current, t.id]);
+  inp.value = '';
+  document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+}
+
+function tagWidgetSelect(containerId, id) {
+  const current = tagWidgetGetSelected(containerId);
+  if (!current.includes(id)) tagWidgetSetSelected(containerId, [...current, id]);
+  document.getElementById(`${containerId}-input`).value = '';
+  document.getElementById(`${containerId}-suggestions`).innerHTML = '';
+}
+
+// Legacy: keep renderTagSelect as no-op (widget replaces it)
+function renderTagSelect() {}
+
+async function addTag() {
+  const inp = document.getElementById('new-tag-input');
+  const name = inp.value.trim();
+  if (!name) return;
+  // Existiert bereits?
+  const existing = tags.find(t => t.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    inp.value = '';
+    // Sichtbar machen
+    const item = document.getElementById(`tag-item-${existing.id}`);
+    if (item) item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    toast(`Tag "${existing.name}" already exists`);
+    return;
+  }
+  await api('/api/kategorien','POST',{name});
+  inp.value = '';
+  await loadTags();
+  toast('Tag created');
+  // Neu erstellten Tag ans Ende scrollen
+  const tagList = document.getElementById('tag-list');
+  if (tagList.classList.contains('scrollable')) tagList.scrollTop = tagList.scrollHeight;
+}
+
+async function renameTag(id, old) {
+  const name = prompt('New name:', old);
+  if (!name || name === old) return;
+  await api(`/api/kategorien/${id}`,'PUT',{name});
+  await loadTags();
+  await loadFormulae();
+}
+
+async function deleteTag(id) {
+  if (!confirm('Delete tag? Formulae will keep their other tags.')) return;
+  await api(`/api/kategorien/${id}`,'DELETE');
+  activeTags.delete(id);
+  await loadTags();
+  await loadFormulae();
+}
+
+function filterByTag(id) {
+  if (id === 'ALL') {
+    activeTags.clear();
+  } else {
+    const current = activeTags.get(id) || 0;
+    if (current === 1) {
+      activeTags.delete(id);
+    } else {
+      activeTags.set(id, 1);
+    }
+  }
+
+  if (!currentPanel) currentPanel = 'panel-formulae';
+  updateView();
+}
+
+function filterTagExcludeTag(event, id) {
+  event.preventDefault();
+  const current = activeTags.get(id) || 0;
+  if (current === -1) {
+    activeTags.delete(id);
+  } else {
+    activeTags.set(id, -1);
+  }
+  if (!currentPanel) currentPanel = 'panel-formulae';
+  updateView();
+}
+
+// ── XML-IDs ────────────────────────────────────────────────────────────────
+async function loadXmlIds() {
+  xmlIds = await api('/api/xml_ids');
+}
+
+// ── Formulae ───────────────────────────────────────────────────────────────
+async function loadFormulae() {
+  const params = new URLSearchParams();
+  for (const [value, state] of filterRegions.entries()) {
+    if (state === 1 && value !== '__none__') params.append('tag_region', value);
+  }
+  for (const [value, state] of filterSections.entries()) {
+    if (state === 1 && value !== '__none__') params.append('tag_textteil', value);
+  }
+  formulae = await api('/api/ideale?' + params.toString());
+  renderFormulae();
+}
+
+function setSortMode(mode) {
+  formulaeSortMode = mode;
+  document.getElementById('sort-btn-alpha').classList.toggle('active', mode === 'alpha');
+  document.getElementById('sort-btn-variants').classList.toggle('active', mode === 'variants');
+  renderFormulae();
+}
+
+function renderFormulae() {
+  const q = document.getElementById('formula-search').value.toLowerCase();
+  const container = document.getElementById('formulae-list');
+  let filtered = formulae;
+  const includeTags = [...activeTags.entries()].filter(([,state]) => state === 1).map(([id]) => id);
+  const excludeTags = [...activeTags.entries()].filter(([,state]) => state === -1).map(([id]) => id);
+  if (includeTags.length) {
+    filtered = filtered.filter(i => i.kategorie_ids && i.kategorie_ids.some(id => includeTags.includes(id)));
+  }
+  if (excludeTags.length) {
+    filtered = filtered.filter(i => !(i.kategorie_ids || []).some(id => excludeTags.includes(id)));
+  }
+  if (filterRegions.size > 0) {
+    filtered = filtered.filter(i =>
+      matchesFacetFilters(i.tags_region?.split(',').filter(Boolean) || [], filterRegions)
+    );
+  }
+  if (filterSections.size > 0) {
+    filtered = filtered.filter(i =>
+      matchesFacetFilters(i.tags_textteil?.split(',').filter(Boolean) || [], filterSections)
+    );
+  }
+  if (q) filtered = filtered.filter(i => i.formulierung.toLowerCase().includes(q));
+
+  // Sort
+  if (formulaeSortMode === 'variants') {
+    filtered = [...filtered].sort((a, b) => (b.varianten_anzahl || 0) - (a.varianten_anzahl || 0));
+  } else {
+    filtered = [...filtered].sort((a, b) => (a.formulierung || '').localeCompare(b.formulierung || ''));
+  }
+
+  // Update counter and selection info
+  const selCount = [...selectedFormulaIds].filter(id => filtered.some(f => f.id === id)).length;
+  const selTotal = selectedFormulaIds.size;
+  const countEl  = document.getElementById('formulae-count');
+  if (countEl) {
+    countEl.textContent = `${filtered.length} visible` +
+      (selTotal > 0 ? ` · ${selTotal} selected` : '');
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty">No formulae found.</div>';
+    return;
+  }
+  container.innerHTML = filtered.map(renderFormulaCard).join('');
+}
+
+function renderFormulaCard(formula) {
+  const tagNames  = formula.kategorie_names || [];
+  const tagColors = formula.tag_colors      || [];
+  const badge = tagNames.map((n, i) => {
+    const col = tagColors[i];
+    const style = col ? `background:${col};color:white;border-color:${col}` : '';
+    return `<span class="tag-badge" style="${style}">${esc(n)}</span>`;
+  }).join('');
+  const regionTags = (formula.tags_region || '').split(',').filter(Boolean)
+    .map(t => `<span class="ftag ftag-region">${esc(t)}</span>`).join('');
+  const sectionTags = (formula.tags_textteil || '').split(',').filter(Boolean)
+    .map(t => `<span class="ftag ftag-section">${esc(t)}</span>`).join('');
+  const tagRow = (regionTags || sectionTags)
+    ? `<div class="formula-tags">${regionTags}${sectionTags}</div>` : '';
+  const anzahl = formula.varianten_anzahl || 0;
+  const anzahlBadge = `<span class="var-count-badge" title="${anzahl} Variant(s)">${anzahl} ⇄</span>`;
+  const isSelected = selectedFormulaIds.has(formula.id);
+  return `
+  <div class="formula-card${isSelected ? ' selected-for-export' : ''}" id="formula-${formula.id}">
+    <div class="formula-head" onclick="toggleFormulaBody(${formula.id})">
+      <input type="checkbox" class="formula-select-cb"
+             ${isSelected ? 'checked' : ''}
+             onclick="event.stopPropagation();toggleFormulaSelection(${formula.id})"
+             title="Select for export">
+      <span class="formula-text">${esc(formula.formulierung)}</span>
+      ${badge}
+      ${anzahlBadge}
+      <span class="actions">
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editFormula(${formula.id})" title="Edit Formula">✎</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteFormula(${formula.id})" title="Delete Formula">✕</button>
+      </span>
+    </div>
+    ${tagRow ? `<div class="formula-foot">${tagRow}</div>` : ''}
+    <div class="formula-body" id="fbody-${formula.id}" style="display:none">
+      <div class="actions">
+        <button class="btn btn-primary btn-sm" id="move-selected-btn-${formula.id}" onclick="event.stopPropagation();moveSelectedVariants(${formula.id})" title="Move Selected Variants to Another Formula" style="display:none">Move Selection</button>
+        <button class="btn btn-ghost btn-sm btn-bulk${bulkEditMode[formula.id] ? ' active' : ''}" onclick="event.stopPropagation();toggleBulkEdit(${formula.id})" id="bulk-edit-btn-${formula.id}" title="${bulkEditMode[formula.id] ? 'Deactivate' : 'Activate'} Bulk Edit">${bulkEditMode[formula.id] ? 'Deactivate Bulk Edit' : 'Activate Bulk Edit'}</button>
+      </div>
+      <div id="var-list-${formula.id}">Loading…</div>
+    </div>
+  </div>`;
+}
+
+// ── Formula selection & export ─────────────────────────────────────────────
+function toggleFormulaSelection(id) {
+  if (selectedFormulaIds.has(id)) selectedFormulaIds.delete(id);
+  else selectedFormulaIds.add(id);
+  // Update just this card without full re-render to preserve open bodies
+  const card = document.getElementById(`formula-${id}`);
+  if (card) {
+    card.classList.toggle('selected-for-export', selectedFormulaIds.has(id));
+    const cb = card.querySelector('.formula-select-cb');
+    if (cb) cb.checked = selectedFormulaIds.has(id);
+  }
+  // Refresh count display
+  const countEl = document.getElementById('formulae-count');
+  if (countEl) {
+    const visibleCount = document.querySelectorAll('#formulae-list .formula-card').length;
+    const selTotal = selectedFormulaIds.size;
+    countEl.textContent = `${visibleCount} visible` + (selTotal > 0 ? ` · ${selTotal} selected` : '');
+  }
+}
+
+function selectVisibleFormulae() {
+  document.querySelectorAll('#formulae-list .formula-card').forEach(card => {
+    const id = parseInt(card.id.replace('formula-', ''));
+    if (!isNaN(id)) selectedFormulaIds.add(id);
+  });
+  renderFormulae();
+}
+
+function clearSelection() {
+  selectedFormulaIds.clear();
+  renderFormulae();
+}
+
+async function _resolveVariantOffsets(v) {
+  if (v.offset_start != null && v.offset_end != null) return v;
+  if (!v.id || !v.text_xmlid || !v.string) return v;
+  const details = await api(`/api/varianten/${v.id}`);
+  if (!details.xml_inner || !details.string) return v;
+  const start = details.xml_inner.indexOf(details.string);
+  if (start < 0) return v;
+  v.offset_start = start;
+  v.offset_end = start + details.string.length;
+  return v;
+}
+
+async function exportSelectedCSV() {
+  if (!selectedFormulaIds.size) {
+    toast('No formulae selected — use the checkboxes or "Select visible"');
+    return;
+  }
+  // Fetch variants for all selected formulae in parallel
+  const rows = [['formula_id','formula_text','formula_tags','variant_id','variant_xmlid','variant_string', 'offsetStart', 'offsetEnd']];
+  const selected = formulae.filter(f => selectedFormulaIds.has(f.id));
+
+  await Promise.all(selected.map(async f => {
+    const vars = await api(`/api/varianten?ideal_id=${f.id}`);
+    const tagStr = (f.kategorie_names || []).join('; ');
+    if (!vars.length) {
+      rows.push([f.id, f.formulierung, tagStr, '', '', '', '', '']);
+    } else {
+      for (const v of vars) {
+        await _resolveVariantOffsets(v);
+        rows.push([f.id, f.formulierung, tagStr, v.id, v.text_xmlid, v.string, v.offset_start ?? '', v.offset_end ?? '']);
+      }
+    }
+  }));
+
+  // Sort rows by formula_id then variant_id
+  const header = rows.shift();
+  rows.sort((a, b) => a[0] - b[0] || (a[3]||0) - (b[3]||0));
+  rows.unshift(header);
+
+  const csvContent = rows.map(r =>
+    r.map(cell => {
+      const s = String(cell ?? '');
+      return (s.includes(',') || s.includes('"') || s.includes('\n'))
+        ? '"' + s.replace(/"/g, '""') + '"'
+        : s;
+    }).join(',')
+  ).join('\n');
+
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `FACT_export_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${selectedFormulaIds.size} formulae`);
+}
+
+async function toggleFormulaBody(id) {
+  const body = document.getElementById(`fbody-${id}`);
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    await loadVariantsForFormula(id);
+  } else {
+    body.style.display = 'none';
+    // Beende Bulk Edit beim Schließen der Card
+    if (bulkEditMode[id]) {
+      delete bulkEditMode[id];
+      const moveBtn = document.getElementById(`move-selected-btn-${id}`);
+      if (moveBtn) moveBtn.style.display = 'none';
+      const bulkBtn = document.getElementById(`bulk-edit-btn-${id}`);
+      if (bulkBtn) {
+        bulkBtn.classList.remove('active');
+        bulkBtn.textContent = 'Activate Bulk Edit';
+        bulkBtn.title = 'Activate Bulk Edit';
+      }
+    }
+  }
+}
+
+async function toggleBulkEdit(formulaId) {
+  const active = !bulkEditMode[formulaId];
+  if (!active) {
+    delete bulkEditMode[formulaId];
+  } else {
+    bulkEditMode[formulaId] = new Set();
+  }
+
+  // Button anzeigen/verstecken
+  const moveBtn = document.getElementById(`move-selected-btn-${formulaId}`);
+  if (moveBtn) {
+    moveBtn.style.display = active ? 'inline-block' : 'none';
+  }
+
+  const bulkBtn = document.getElementById(`bulk-edit-btn-${formulaId}`);
+  if (bulkBtn) {
+    bulkBtn.classList.toggle('active', active);
+    bulkBtn.textContent = active ? 'Deactivate Bulk Edit' : 'Activate Bulk Edit';
+    bulkBtn.title = active ? 'Deactivate Bulk Edit' : 'Activate Bulk Edit';
+  }
+
+  await loadVariantsForFormula(formulaId);
+}
+
+function toggleVariantSelection(formulaId, variantId) {
+  const selected = bulkEditMode[formulaId];
+  if (!selected) return;
+  if (selected.has(variantId)) {
+    selected.delete(variantId);
+  } else {
+    selected.add(variantId);
+  }
+}
+
+async function moveSelectedVariants(formulaId) {
+  const selected = bulkEditMode[formulaId];
+  if (!selected || selected.size === 0) {
+    toast('No variants selected');
+    return;
+  }
+  // Open modal to select target formula
+  openBulkMoveModal(formulaId, [...selected]);
+}
+
+function openBulkMoveModal(sourceFormulaId, selectedVariantIds) {
+  document.getElementById('bulk-source-formula-id').value = sourceFormulaId;
+  document.getElementById('bulk-selected-variants').value = JSON.stringify(selectedVariantIds);
+  document.getElementById('bulk-move-count').textContent = `Moving ${selectedVariantIds.length} variant(s) from formula #${sourceFormulaId}`;
+  
+  // Reset to search mode
+  switchFormulaMode('search');
+  
+  // Clear search fields
+  document.getElementById('bulk-formula-search').value = '';
+  document.getElementById('bulk-formula-results').innerHTML = '';
+  
+  // Clear new formula fields
+  document.getElementById('new-formula-input').value = '';
+  document.getElementById('new-note-input').value = '';
+  
+  // Initialize tag widget for new mode
+  renderTagWidget('new-tag-widget', []);
+  
+  // Reset target formula id
+  _bulkTargetFormulaId = null;
+  document.getElementById('bulk-move-btn').disabled = true;
+  
+  document.getElementById('bulk-move-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('bulk-formula-search').focus(), 50);
+}
+
+function closeBulkMoveModal() {
+  document.getElementById('bulk-move-overlay').classList.remove('open');
+  _bulkTargetFormulaId = null;
+}
+document.getElementById('bulk-move-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeBulkMoveModal();
+});
+
+function switchFormulaMode(mode) {
+  const searchMode = document.getElementById('search-mode');
+  const newMode = document.getElementById('new-mode');
+  const searchBtn = document.getElementById('mode-search-btn');
+  const newBtn = document.getElementById('mode-new-btn');
+  
+  // Determine if in bulk move modal context
+  const bulkMoveBtn = document.getElementById('bulk-move-btn');
+  const inBulkMove = bulkMoveBtn !== null;
+  
+  if (mode === 'search') {
+    searchMode.style.display = 'block';
+    newMode.style.display = 'none';
+    searchBtn.classList.add('active');
+    newBtn.classList.remove('active');
+    if (inBulkMove) {
+      bulkMoveBtn.textContent = 'Move Variants';
+      bulkMoveBtn.disabled = true;
+    }
+    setTimeout(() => {
+      const input = document.getElementById('bulk-formula-search') || document.getElementById('formula-search-input');
+      if (input) input.focus();
+    }, 50);
+  } else {
+    searchMode.style.display = 'none';
+    newMode.style.display = 'block';
+    searchBtn.classList.remove('active');
+    newBtn.classList.add('active');
+    if (inBulkMove) {
+      bulkMoveBtn.textContent = 'Create Formula & Move Variants';
+      bulkMoveBtn.disabled = false;
+    }
+    setTimeout(() => document.getElementById('new-formula-input').focus(), 50);
+    // Initialize tag widget for new mode if not done
+    if (!document.getElementById('new-tag-widget').querySelector('.tag-chip')) {
+      renderTagWidget('new-tag-widget', []);
+    }
+  }
+}
+
+
+
+async function searchBulkFormulae() {
+  const q = document.getElementById('bulk-formula-search').value.trim();
+  const resultsEl = document.getElementById('bulk-formula-results');
+  const moveBtn = document.getElementById('bulk-move-btn');
+  
+  // Clear target formula id when searching (no selection yet)
+  _bulkTargetFormulaId = null;
+  moveBtn.disabled = true;
+  
+  if (!q) {
+    resultsEl.innerHTML = '';
+    return;
+  }
+  const matches = formulae.filter(f => f.formulierung.toLowerCase().includes(q.toLowerCase()));
+  if (!matches.length) {
+    resultsEl.innerHTML = '<div class="formula-search-empty">No matching formulae found</div>';
+    return;
+  }
+  resultsEl.innerHTML = matches.slice(0, 10).map(f => {
+        const tag = tags.find(t => f.kategorie_ids?.includes(t.id));
+        const katName = tag?.name || '';
+        const katColor = tag?.color || '';
+        return `
+    <div class="formula-result-card" onclick="selectBulkTargetFormula(${f.id})">
+      <div class="formula-head">
+        <span class="formula-text">${esc(f.formulierung)}</span>
+        ${katName ? `<span class="tag-badge" ${katColor ? `style="background:${katColor};"` : ''}>${esc(katName)}</span>` : ''}
+        <span class="var-count-badge">${f.varianten_anzahl} ⇄</span>
+      </div>
+      <div class="formula-result-meta">
+        <span>ID: ${f.id}</span>  
+      </div>
+    </div>
+  `}).join('');
+}
+
+let _bulkTargetFormulaId = null;
+
+function selectBulkTargetFormula(formulaId) {
+  _bulkTargetFormulaId = formulaId;
+  document.getElementById('bulk-move-btn').disabled = false;
+  // Highlight selected
+  document.querySelectorAll('.formula-result-card').forEach(item => item.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+}
+
+async function confirmBulkMove() {
+  const sourceFormulaId = parseInt(document.getElementById('bulk-source-formula-id').value);
+  const selectedVariantIds = JSON.parse(document.getElementById('bulk-selected-variants').value);
+  const mode = document.getElementById('mode-search-btn').classList.contains('active') ? 'search' : 'new';
+  
+  let targetFormulaId;
+  
+  if (mode === 'search') {
+    // Link to existing formula
+    if (!_bulkTargetFormulaId) {
+      toast('Please select a target formula');
+      return;
+    }
+    targetFormulaId = _bulkTargetFormulaId;
+    if (sourceFormulaId === targetFormulaId) {
+      toast('Cannot move to the same formula');
+      return;
+    }
+    if (!confirm(`Move ${selectedVariantIds.length} variant(s) to formula #${targetFormulaId}?`)) return;
+  } else {
+    // Create new formula
+    const formula = document.getElementById('new-formula-input').value.trim();
+    if (!formula) {
+      toast('Formula required');
+      return;
+    }
+    const tagIds = tagWidgetGetSelected('new-tag-widget');
+    const note = document.getElementById('new-note-input').value.trim() || null;
+    
+    if (!confirm(`Create new formula and move ${selectedVariantIds.length} variant(s)?`)) return;
+    
+    try {
+      const f = await api('/api/ideale', 'POST', { formulierung: formula, kategorie_ids: tagIds, notiz: note });
+      targetFormulaId = f.id;
+    } catch (e) {
+      console.error('Error creating formula:', e);
+      toast(`Error creating formula: ${e.message || e}`);
+      return;
+    }
+  }
+  
+  // Move variants to target formula
+  try {
+    for (const vid of selectedVariantIds) {
+      await api(`/api/varianten/${vid}`, 'PUT', { ideal_id: targetFormulaId });
+    }
+    toast(`Moved ${selectedVariantIds.length} variant(s)`);
+    
+    // Reset bulk edit UI
+    delete bulkEditMode[sourceFormulaId];
+    const moveBtn = document.getElementById(`move-selected-btn-${sourceFormulaId}`);
+    if (moveBtn) moveBtn.style.display = 'none';
+    const bulkBtn = document.getElementById(`bulk-edit-btn-${sourceFormulaId}`);
+    if (bulkBtn) {
+      bulkBtn.classList.remove('active');
+      bulkBtn.textContent = 'Activate Bulk Edit';
+      bulkBtn.title = 'Activate Bulk Edit';
+    }
+    
+    // Refresh formulae
+    await loadFormulae();
+    _bulkTargetFormulaId = null;
+    closeBulkMoveModal();
+  } catch (e) {
+    console.error('Error moving variants:', e);
+    toast(`Error moving variants: ${e.message || e}`);
+  }
+}
+
+let varSortState = {}; // formulaId → {col, dir}
+
+async function loadVariantsForFormula(formulaId, sortCol='text_xmlid', sortDir='asc') {
+  const vars = await api(`/api/varianten?ideal_id=${formulaId}`);
+  const el = document.getElementById(`var-list-${formulaId}`);
+  if (!vars.length) {
+    el.innerHTML = '<p style="color:var(--muted);font-style:italic;font-size:.9rem;padding:.75rem 1rem">No variants recorded.</p>';
+    return;
+  }
+
+  // Sorting
+  const state = varSortState[formulaId] || {col: 'text_xmlid', dir: 'asc'};
+  const col = sortCol, dir = sortDir;
+  varSortState[formulaId] = {col, dir};
+
+  const sorted = [...vars].sort((a, b) => {
+    const av = (a[col] || '').toString().toLowerCase();
+    const bv = (b[col] || '').toString().toLowerCase();
+    return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  function sortTh(label, col2) {
+    const active = state.col === col2;
+    const nextDir = (active && state.dir === 'asc') ? 'desc' : 'asc';
+    const arrow = active ? (state.dir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th style="cursor:pointer;user-select:none" onclick="loadVariantsForFormula(${formulaId},'${col2}','${nextDir}')">${label}${arrow}</th>`;
+  }
+
+  el.innerHTML = `
+  <table class="var-table">
+    <thead><tr>
+      <th>Status</th>
+      ${sortTh('xml:id','text_xmlid')}
+      ${sortTh('Variant','string')}
+      <th>Note</th>
+      ${bulkEditMode[formulaId] ? '<th style="text-align:center">Select</th>' : ''}
+      <th></th>
+    </tr></thead>
+    <tbody>
+    ${sorted.map(v => `
+      <tr>
+        <td><span class="status-dot s${v.verified}" title="${statusLabel(v.verified)}"></span>${statusLabel(v.verified)}</td>
+        <td><span class="xml-id" style="cursor:pointer" onclick="goToTextCard('${esc(v.text_xmlid)}')" title="Show in Text panel">${esc(v.text_xmlid)} ↗</span></td>
+        <td class="var-string">
+          <span style="cursor:pointer" onclick="window.open('/annotate?xmlid=${encodeURIComponent(v.text_xmlid)}','_blank')" title="Open Annotation and Linking Editor">${esc(v.string)} <span style="font-size:.7rem;color:var(--muted)">↗</span></span>
+        </td>
+        <td class="note-cell">${esc(v.notiz||'')}</td>
+      ${bulkEditMode[formulaId] ? `<td style="text-align:center"><input type="checkbox" class="bulk-select" data-vid="${v.id}" onchange="toggleVariantSelection(${formulaId}, ${v.id})" ${bulkEditMode[formulaId].has(v.id) ? 'checked' : ''}></td>` : ''}
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="openVariantModal(${v.id},${formulaId})" title="Edit Variant">✎</button>
+          <button class="btn btn-ghost btn-sm" onclick="verifyVariant(${v.id},${formulaId})" title="Validate Variant">↻</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteVariant(${v.id},${formulaId})" title="Delete Variant">✕</button>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table>
+  ${`<div class="actions">${bulkEditMode[formulaId] ? `<button class="btn btn-primary btn-sm" onclick="moveSelectedVariants(${formulaId})" title="Move Selected Variants to Another Formula">Move Selection</button>` : ''}<button class="btn btn-ghost btn-sm btn-bulk${bulkEditMode[formulaId] ? ' active' : ''}" onclick="toggleBulkEdit(${formulaId})" title="${bulkEditMode[formulaId] ? 'Deactivate' : 'Activate'} Bulk Edit">${bulkEditMode[formulaId] ? 'Deactivate Bulk Edit' : 'Activate Bulk Edit'}</button></div>`}`;
+}
+
+function statusLabel(s) {
+  return s===1 ? 'valid' : s===-1 ? 'invalid' : 'validation pending';
+}
+
+async function verifyVariant(vid, formulaId) {
+  await api(`/api/varianten/${vid}/verifizieren`, 'POST');
+  await loadVariantsForFormula(formulaId);
+  _allTexts = await api('/api/suche/texte');
+  renderTextsGrid();
+  toast('Variant validated');
+}
+
+async function deleteVariant(vid, formulaId) {
+  if (!confirm('Delete variant?')) return;
+  await api(`/api/varianten/${vid}`, 'DELETE');
+  await loadVariantsForFormula(formulaId);
+  // Update variant count badge on the card
+  formulae = await api('/api/ideale');
+  const card = document.getElementById(`formula-${formulaId}`);
+  if (card) {
+    const badge = card.querySelector('.var-count-badge');
+    const formula = formulae.find(i => i.id === formulaId);
+    if (badge && formula) badge.textContent = `${formula.varianten_anzahl} ⇄`;
+  }
+  toast('Variant deleted');
+}
+
+// ── Variant edit modal ─────────────────────────────────────────────────────
+function _renderVeditContext(ctx, inner, string, offsetStart, offsetEnd) {
+  // Shared: renders XML context with highlighted string, sets dataset
+  ctx.dataset.inner      = inner;
+  ctx.dataset.xmlid      = ctx.dataset.xmlid || ''; // preserved from caller
+  ctx.dataset.offsetStart = offsetStart ?? '';
+  ctx.dataset.offsetEnd   = offsetEnd   ?? '';
+  ctx.textContent = '';
+  if (!inner) { ctx.textContent = '(no XML context available)'; return; }
+  let start = (offsetStart != null && offsetEnd != null && inner.slice(offsetStart,offsetEnd)===string)
+    ? offsetStart : inner.indexOf(string || '');
+  if (start < 0 || !string) { ctx.appendChild(document.createTextNode(inner)); return; }
+  const end = start + string.length;
+  ctx.appendChild(document.createTextNode(inner.slice(0, start)));
+  const mark = document.createElement('mark');
+  mark.style.cssText = 'background:#fff0c0;border-radius:2px;cursor:text';
+  mark.textContent = inner.slice(start, end);
+  ctx.appendChild(mark);
+  ctx.appendChild(document.createTextNode(inner.slice(end)));
+}
+
+async function openVariantModal(vid, formulaId) {
+  const data = await api(`/api/varianten/${vid}`);
+  document.getElementById('vedit-id').value = vid;
+  document.getElementById('vedit-formula-id').value = formulaId;
+  document.getElementById('vedit-formula-text').textContent = data.formulierung || '';
+  document.getElementById('vedit-xmlid').value = data.text_xmlid || '';
+  document.getElementById('vedit-string').value = data.string || '';
+  document.getElementById('vedit-note').value = data.notiz || '';
+  document.getElementById('vedit-file').textContent = data.xml_datei ? `· ${data.xml_datei}` : '';
+
+  const ctx = document.getElementById('vedit-xml-context');
+  ctx.dataset.xmlid = data.text_xmlid || '';
+  _renderVeditContext(ctx, data.xml_inner||'', data.string, data.offset_start, data.offset_end);
+  _updateVeditOffsetInfo(data.offset_start, data.offset_end, data.string, 'vedit-offset-info');
+  document.getElementById('variant-overlay').classList.add('open');
+}
+
+function _updateVeditOffsetInfo(os, oe, string, infoId) {
+  const el = document.getElementById(infoId);
+  if (!el) return;
+  el.textContent = (os != null && oe != null)
+    ? `Offset ${os}–${oe} · "${string}"`
+    : 'No offset stored – select text in the context above to set position.';
+}
+
+function closeVariantModal() {
+  document.getElementById('variant-overlay').classList.remove('open');
+}
+
+async function saveVariant() {
+  const vid     = document.getElementById('vedit-id').value;
+  const formulaId = parseInt(document.getElementById('vedit-formula-id').value);
+  const xmlid   = document.getElementById('vedit-xmlid').value.trim();
+  const string  = document.getElementById('vedit-string').value.trim();
+  const notiz   = document.getElementById('vedit-note').value.trim() || null;
+  if (!string) { toast('Variant string required'); return; }
+  const ctx = document.getElementById('vedit-xml-context');
+  const os = ctx.dataset.offsetStart !== '' ? parseInt(ctx.dataset.offsetStart) : null;
+  const oe = ctx.dataset.offsetEnd   !== '' ? parseInt(ctx.dataset.offsetEnd)   : null;
+  const payload = { ideal_id: formulaId, text_xmlid: xmlid, string, notiz };
+  if (os != null && !isNaN(os)) { payload.offset_start = os; payload.offset_end = oe; }
+  await api(`/api/varianten/${vid}`, 'PUT', payload);
+  closeVariantModal();
+  await loadVariantsForFormula(formulaId);
+  toast('Variant saved');
+}
+
+document.getElementById('variant-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeVariantModal();
+});
+
+// Selection in XML context → update string + offset
+document.getElementById('vedit-xml-context').addEventListener('mouseup', () => {
+  const ctx   = document.getElementById('vedit-xml-context');
+  const inner = ctx.dataset.inner || '';
+  if (!inner) return;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if (!ctx.contains(range.commonAncestorContainer)) return;
+
+  function offsetAt(node, off) {
+    const r = document.createRange();
+    r.setStart(ctx, 0); r.setEnd(node, off);
+    return r.toString().length;
+  }
+  const start = offsetAt(range.startContainer, range.startOffset);
+  const end   = offsetAt(range.endContainer,   range.endOffset);
+  if (end <= start) return;
+  const raw = inner.slice(start, end);
+  const text = raw.trim();
+  if (!text) return;
+  const lead = raw.length - raw.trimStart().length;
+  const ts = start + lead, te = ts + text.length;
+
+  document.getElementById('vedit-string').value = text;
+  ctx.dataset.offsetStart = ts;
+  ctx.dataset.offsetEnd   = te;
+  _updateVeditOffsetInfo(ts, te, text, 'vedit-offset-info');
+  _renderVeditContext(ctx, inner, text, ts, te);
+  sel.removeAllRanges();
+});
+
+async function deleteFormula(id) {
+  if (!confirm('Delete Formula and all Variants?')) return;
+  await api(`/api/ideale/${id}`, 'DELETE');
+  await loadFormulae();
+  toast('Formula deleted');
+}
+
+// ── Formula modal ──────────────────────────────────────────────────────────
+let editVariants = []; // [{id?, text_xmlid, string, notiz}]
+
+function openFormulaModal(formula=null) {
+  document.getElementById('modal-title').textContent = formula ? 'Edit Formula' : 'New Formula';
+  document.getElementById('edit-formula-id').value = formula?.id || '';
+  document.getElementById('edit-formula-text').value = formula?.formulierung || '';
+  document.getElementById('edit-note').value = formula?.notiz || '';
+  renderTagWidget('edit-tag-widget', formula?.kategorie_ids || []);
+  editVariants = [];
+  document.getElementById('formula-overlay').classList.add('open');
+  if (!formula) { renderVarRows(); return; }
+  // Load existing variants
+  api(`/api/varianten?ideal_id=${formula.id}`).then(vars => {
+    editVariants = vars.map(v => ({id:v.id, text_xmlid:v.text_xmlid, string:v.string, notiz:v.notiz||''}));
+    renderVarRows();
+  });
+}
+
+async function editFormula(id) {
+  const formula = formulae.find(i => i.id === id);
+  openFormulaModal(formula);
+}
+
+function closeFormulaModal() {
+  document.getElementById('formula-overlay').classList.remove('open');
+}
+
+function addVarRow(data={}) {
+  editVariants.push({id: null, text_xmlid: data.text_xmlid||'', string: data.string||'', notiz: data.notiz||''});
+  renderVarRows();
+}
+
+function removeVarRow(idx) {
+  editVariants.splice(idx, 1);
+  renderVarRows();
+}
+
+function renderVarRows() {
+  const container = document.getElementById('var-rows');
+  container.innerHTML = editVariants.map((v, i) => `
+    <div class="var-row">
+      <div class="xmlid-combo" id="combo-wrap-${i}">
+        <input
+          id="combo-input-${i}"
+          value="${esc(v.text_xmlid)}"
+          placeholder="Search xml:id…"
+          autocomplete="off"
+          oninput="filterCombo(${i})"
+          onfocus="openCombo(${i})"
+          onblur="setTimeout(()=>closeCombo(${i}),150)"
+          onkeydown="comboKey(event,${i})"
+        >
+        <div class="xmlid-dropdown" id="combo-drop-${i}"></div>
+      </div>
+      <input value="${esc(v.string)}" placeholder="Variant string…" oninput="editVariants[${i}].string=this.value">
+      <input value="${esc(v.notiz)}" placeholder="Note…" oninput="editVariants[${i}].notiz=this.value" style="font-size:.8rem">
+      <button class="remove-var" onclick="removeVarRow(${i})">✕</button>
+    </div>`).join('');
+}
+
+// ── Combobox logic ─────────────────────────────────────────────────────────
+let comboFocus = {}; // {index: focusedOptionIndex}
+
+function getFilteredIds(query) {
+  const q = query.toLowerCase();
+  return q ? xmlIds.filter(id => id.toLowerCase().includes(q)) : xmlIds;
+}
+
+function openCombo(i) {
+  filterCombo(i);
+}
+
+function filterCombo(i) {
+  const input = document.getElementById(`combo-input-${i}`);
+  const drop  = document.getElementById(`combo-drop-${i}`);
+  const query = input.value;
+  editVariants[i].text_xmlid = query;
+  const matches = getFilteredIds(query).slice(0, 60);
+  if (!matches.length) { drop.classList.remove('open'); return; }
+  comboFocus[i] = -1;
+  drop.innerHTML = matches.map((id, j) =>
+    `<div class="xmlid-option" data-val="${esc(id)}" data-idx="${j}"
+      onmousedown="selectCombo(${i},'${esc(id)}')">${esc(id)}</div>`
+  ).join('');
+  drop.classList.add('open');
+}
+
+function closeCombo(i) {
+  const drop = document.getElementById(`combo-drop-${i}`);
+  if (drop) drop.classList.remove('open');
+}
+
+function selectCombo(i, value) {
+  editVariants[i].text_xmlid = value;
+  const input = document.getElementById(`combo-input-${i}`);
+  if (input) input.value = value;
+  closeCombo(i);
+}
+
+function comboKey(e, i) {
+  const drop = document.getElementById(`combo-drop-${i}`);
+  const opts = drop.querySelectorAll('.xmlid-option');
+  if (!opts.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    comboFocus[i] = Math.min((comboFocus[i]||0)+1, opts.length-1);
+    opts.forEach((o,j) => o.classList.toggle('focused', j===comboFocus[i]));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    comboFocus[i] = Math.max((comboFocus[i]||0)-1, 0);
+    opts.forEach((o,j) => o.classList.toggle('focused', j===comboFocus[i]));
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    const focused = drop.querySelector('.focused');
+    if (focused) selectCombo(i, focused.dataset.val);
+  } else if (e.key === 'Escape') {
+    closeCombo(i);
+  }
+}
+
+async function saveFormula() {
+  const id = document.getElementById('edit-formula-id').value;
+  const formulierung = document.getElementById('edit-formula-text').value.trim();
+  if (!formulierung) { toast('Formula required'); return; }
+  const payload = {
+    formulierung,
+    kategorie_ids: tagWidgetGetSelected('edit-tag-widget'),
+    notiz: document.getElementById('edit-note').value.trim() || null,
+  };
+
+  let formula;
+  if (id) {
+    formula = await api(`/api/ideale/${id}`, 'PUT', payload);
+  } else {
+    formula = await api('/api/ideale', 'POST', payload);
+  }
+
+  // Variants: delete existing and recreate (simplest strategy)
+  if (id) {
+    const existing = await api(`/api/varianten?ideal_id=${id}`);
+    for (const v of existing) await api(`/api/varianten/${v.id}`, 'DELETE');
+  }
+  for (const v of editVariants) {
+    if (!v.text_xmlid || !v.string) continue;
+    await api('/api/varianten', 'POST', {
+      ideal_id: formula.id,
+      text_xmlid: v.text_xmlid,
+      string: v.string,
+      notiz: v.notiz || null,
+    });
+  }
+
+  closeFormulaModal();
+  await loadFormulae();
+  await loadTexts();
+  await loadFilterTags();
+  toast('Saved');
+}
+
+// ── Texts ──────────────────────────────────────────────────────────────────
+async function loadTexts() {
+  const texts = await api('/api/suche/texte');
+  _allTexts = texts.map(t => ({
+    ...t,
+    text_xmlid: t.text_xmlid,
+    anzahl_varianten: Number(t.anzahl_varianten || 0),
+    fehler: Number(t.fehler || 0),
+    tag_ids_list: (t.tag_ids || '').split(',').filter(Boolean).map(id => Number(id)),
+    tag_regions_list: (t.tag_regions || '').split(',').filter(Boolean),
+    tag_sections_list: (t.tag_sections || '').split(',').filter(Boolean),
+  }));
+  renderTextsGrid();
+}
+
+// Master list for client-side filtering
+let _allTexts = [];
+let _filteredTextDocs = [];
+let _textDetailDocId = null;
+let _currentTextDocIndex = -1;
+
+function _docIdFromXmlId(xmlid) {
+  const m = xmlid.match(/^(.+?-\d+[A-Za-z]*)(?:_.*)?$/);
+  return m ? m[1] : xmlid;
+}
+
+function stripHtml(s) {
+  return s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function hexToRgba(hex, alpha) {
+  if (!hex) return null;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function resolveOverlaps(hits) {
+  if (!hits.length) return [];
+  const pts = new Set();
+  hits.forEach(h => { pts.add(h.s); pts.add(h.e); });
+  const sorted = [...pts].sort((a, b) => a - b);
+  const segments = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const s = sorted[i], e = sorted[i + 1];
+    const covering = hits.filter(h => h.s <= s && h.e >= e);
+    if (covering.length) {
+      const primary = covering[0];
+      segments.push({ s, e, v: primary.v, overlaps: covering.length > 1 });
+    }
+  }
+  return segments;
+}
+
+function renderAnnotatedText(inner, xmlid, variants = []) {
+  if (!inner) return '';
+  const relevant = variants.filter(v => v.text_xmlid === xmlid);
+  const hits = [];
+  for (const v of relevant) {
+    let s, e;
+    if (v.offset_start != null && v.offset_end != null) {
+      s = v.offset_start;
+      e = v.offset_end;
+    } else if (v.string) {
+      const idx = inner.indexOf(v.string);
+      if (idx < 0) continue;
+      s = idx;
+      e = idx + v.string.length;
+    } else {
+      continue;
+    }
+    hits.push({ s, e, v, overlaps: !!v.overlaps });
+  }
+
+  const sel = resolveOverlaps(hits);
+  sel.sort((a, b) => a.s - b.s);
+
+  let html = '';
+  let i = 0;
+  for (const h of sel) {
+    const { s, e, v, overlaps } = h;
+    if (i < s) html += esc(inner.slice(i, s));
+    const color = v.tag_color || null;
+    const style = color ? `background:${hexToRgba(color, 0.25)};border-bottom:2px solid ${hexToRgba(color, 0.7)};` : '';
+    const title = esc((v.formulierung || '') + (v.kategorie_names ? ' [' + v.kategorie_names + ']' : ''));
+    const classes = 'linked-span' + (overlaps ? ' overlaps' : '');
+    html += `<span class="${classes}" style="${style}" title="${title}">${esc(inner.slice(s, e))}</span>`;
+    i = e;
+  }
+  if (i < inner.length) html += esc(inner.slice(i));
+  return html || esc(inner);
+}
+
+function renderTextsGrid() {
+  const el  = document.getElementById('texte-grid');
+  const q   = (document.getElementById('text-search')?.value || '').trim().toLowerCase();
+
+  // Active sidebar filters
+  const activeRegions = [...filterRegions];
+  const activeSects   = [...filterSections];
+
+  const docs = new Map();
+  _allTexts.forEach(t => {
+    const docId = _docIdFromXmlId(t.text_xmlid);
+    const existing = docs.get(docId) || {
+      doc_id: docId,
+      text_xmlids: [],
+      anzahl_varianten: 0,
+      fehler: 0,
+      tag_ids_set: new Set(),
+      tag_regions_set: new Set(),
+      tag_sections_set: new Set(),
+      parts_count: 0,
+    };
+    existing.text_xmlids.push(t.text_xmlid);
+    existing.parts_count += 1;
+    existing.anzahl_varianten += t.anzahl_varianten || 0;
+    existing.fehler += t.fehler || 0;
+    (t.tag_ids_list || []).forEach(id => existing.tag_ids_set.add(id));
+    (t.tag_regions_list || []).forEach(r => existing.tag_regions_set.add(r));
+    (t.tag_sections_list || []).forEach(s => existing.tag_sections_set.add(s));
+    docs.set(docId, existing);
+  });
+  let data = Array.from(docs.values()).map(d => ({
+    ...d,
+    tag_ids_list: Array.from(d.tag_ids_set),
+    tag_regions_list: Array.from(d.tag_regions_set),
+    tag_sections_list: Array.from(d.tag_sections_set),
+  }));
+  const totalDocs = data.length;
+
+  // xml:id search
+  if (q) data = data.filter(t =>
+    t.doc_id.toLowerCase().includes(q) || t.text_xmlids.some(xmlid => xmlid.toLowerCase().includes(q))
+  );
+
+  // Tag filter — include/exclude logic for documents
+  const includeTagIds = [...activeTags.entries()].filter(([,state]) => state === 1).map(([id]) => id);
+  const excludeTagIds = [...activeTags.entries()].filter(([,state]) => state === -1).map(([id]) => id);
+  if (includeTagIds.length) {
+    data = data.filter(t =>
+      (t.tag_ids_list || []).some(id => includeTagIds.includes(id))
+    );
+  }
+  if (excludeTagIds.length) {
+    data = data.filter(t =>
+      !(t.tag_ids_list || []).some(id => excludeTagIds.includes(id))
+    );
+  }
+  if (filterRegions.size > 0) {
+    data = data.filter(t =>
+      matchesFacetFilters(t.tag_regions_list || [], filterRegions)
+    );
+  }
+  if (filterSections.size > 0) {
+    data = data.filter(t =>
+      matchesFacetFilters(t.tag_sections_list || [], filterSections)
+    );
+  }
+
+  const visibleDocs = data.length;
+  const countEl = document.getElementById('text-count');
+  if (countEl) {
+    countEl.textContent = `${visibleDocs} / ${totalDocs} visible`;
+  }
+
+  _filteredTextDocs = data.map(d => d.doc_id);
+  if (_textDetailDocId) {
+    _currentTextDocIndex = _filteredTextDocs.indexOf(_textDetailDocId);
+  }
+
+  if (!data.length) {
+    el.innerHTML = '<div class="empty">No texts match the current filters.</div>';
+    return;
+  }
+
+  el.innerHTML = data.map(t => {
+    const activeClass = t.doc_id === _textDetailDocId ? ' active-card' : '';
+    // Tag badges: colour-coded
+    const tagBadges = (t.tag_ids_list || []).map(id => {
+      const tg = tags.find(x => x.id === id);
+      if (!tg) return '';
+      const style = tg.color ? `background:${tg.color};color:white;border-color:${tg.color}` : '';
+      return `<span class="ctag" style="${style}">${esc(tg.name)}</span>`;
+    }).join('');
+    const regionBadges = (t.tag_regions_list || []).map(r =>
+      `<span class="ctag" style="background:#ddecd6;color:#2d4a26;border-color:#b8d4ae">${esc(r)}</span>`
+    ).join('');
+    const sectBadges = (t.tag_sections_list || []).map(s =>
+      `<span class="ctag" style="background:#e8e0f5;color:#3d2d6a;border-color:#c8b8e8">${esc(s)}</span>`
+    ).join('');
+    return `
+    <div class="text-card${activeClass}" id="tcard-${esc(t.doc_id)}" onclick="showTextDetail('${esc(t.doc_id)}')">
+      <div class="tid">${esc(t.doc_id)}</div>
+      <div class="count">${t.anzahl_varianten} <span class="count-sub">Variant${t.anzahl_varianten!==1?'s':''}</span></div>
+      <div class="count-sub" style="font-size:.8rem;color:var(--muted)">Parts: ${t.parts_count}</div>
+      ${t.fehler>0?`<span class="err-badge">${t.fehler} ✕</span>`:''}
+      ${tagBadges||regionBadges||sectBadges
+        ? `<div class="card-tags">${tagBadges}${regionBadges}${sectBadges}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+document.addEventListener('keydown', handleTextDetailArrows);
+
+function handleTextDetailArrows(e) {
+  const panel = document.getElementById('panel-text-detail');
+  if (!panel.classList.contains('active')) return;
+  const active = document.activeElement?.tagName;
+  if (['INPUT','TEXTAREA','SELECT'].includes(active)) return;
+  if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
+  e.preventDefault();
+  navigateTextDetail(e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 1);
+}
+
+function navigateTextDetail(direction) {
+  if (!_filteredTextDocs.length) return;
+  if (_currentTextDocIndex < 0) {
+    _currentTextDocIndex = _filteredTextDocs.indexOf(_textDetailDocId);
+  }
+  if (_currentTextDocIndex < 0) _currentTextDocIndex = 0;
+  let next = _currentTextDocIndex + direction;
+  if (next < 0) next = _filteredTextDocs.length - 1;
+  else if (next >= _filteredTextDocs.length) next = 0;
+  showTextDetail(_filteredTextDocs[next]);
+}
+
+// Navigate to text panel and highlight a specific card
+function goToTextCard(xmlid) {
+  const docId = _docIdFromXmlId(xmlid);
+  // Clear search so the card is visible in the list state
+  const inp = document.getElementById('text-search');
+  if (inp) inp.value = '';
+  renderTextsGrid();
+  showTextDetail(docId);
+}
+
+async function showTextDetail(docId) {
+  _textDetailDocId = docId;
+  _currentTextDocIndex = _filteredTextDocs.indexOf(docId);
+  document.getElementById('text-detail-title').textContent = docId;
+  const counterEl = document.getElementById('detail-position-counter');
+  if (counterEl) {
+    counterEl.textContent = _filteredTextDocs.length
+      ? `${_currentTextDocIndex + 1} / ${_filteredTextDocs.length}`
+      : '';
+  }
+  showPanel('panel-text-detail');
+  await renderTextDetail(docId);
+}
+
+async function renderTextDetail(docId) {
+  const doc = await api(`/api/xml_doc?doc_id=${encodeURIComponent(docId)}`);
+  const el   = document.getElementById('text-detail-list');
+  if (!doc.parts || !doc.parts.length) {
+    el.innerHTML = '<div class="empty">No document parts found.</div>';
+    return;
+  }
+
+  const totalVariants = doc.parts.reduce((sum, p) => sum + (p.anzahl_varianten || 0), 0);
+  const totalErrors = doc.parts.reduce((sum, p) => sum + (p.fehler || 0), 0);
+
+  const summaryText = `<strong>${doc.parts.length}</strong> section${doc.parts.length !== 1 ? 's' : ''}` +
+    ` • <strong>${totalVariants}</strong> linked variant${totalVariants !== 1 ? 's' : ''}` +
+    `${totalErrors ? ` • <strong>${totalErrors}</strong> invalid` : ''}`;
+  const summaryEl = document.getElementById('text-detail-summary');
+  if (summaryEl) summaryEl.innerHTML = summaryText;
+
+  const variantMap = new Map();
+  await Promise.all(doc.parts.map(async p => {
+    if (p.anzahl_varianten > 0) {
+      const variants = await api(`/api/variants?text_xmlid=${encodeURIComponent(p.xmlid)}`);
+      variantMap.set(p.xmlid, variants || []);
+    } else {
+      variantMap.set(p.xmlid, []);
+    }
+  }));
+
+  el.innerHTML = `
+    <table class="text-detail-table">
+      <thead>
+        <tr>
+          <th>Section info</th>
+          <th>Text</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${doc.parts.map((p, idx) => {
+          const variants = variantMap.get(p.xmlid) || [];
+          const textHtml = renderAnnotatedText(p.inner_xml || '', p.xmlid, variants);
+          return `
+          <tr class="text-detail-row">
+            <td class="text-detail-meta">
+              <div class="meta-row"><span class="part-title">${idx + 1}. ${esc(p.tag_textteil || p.tag || '')}</span></div>
+              <div class="meta-row"><a class="xmlid-link" href="/annotate?xmlid=${encodeURIComponent(p.xmlid)}" target="_blank">${esc(p.xmlid)} ↗</a></div>
+              <div class="meta-row"><span class="meta-label">Variants</span> ${p.anzahl_varianten || 0}</div>
+              <div class="meta-row"><span class="meta-label">Invalid</span> ${p.fehler || 0}</div>
+            </td>
+            <td class="text-detail-inner">${textHtml || '<span class="muted">No text available</span>'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// Close overlay on click outside
+document.getElementById('formula-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeFormulaModal();
+});
+
+// New-tag sidebar input: highlight & scroll existing match while typing
+document.getElementById('new-tag-input').addEventListener('input', function() {
+  const q = this.value.trim().toLowerCase();
+  // Clear previous highlights
+  document.querySelectorAll('#tag-list .tag-item.match-highlight')
+    .forEach(el => el.classList.remove('match-highlight'));
+  if (!q) return;
+  const match = tags.find(t => t.name.toLowerCase().includes(q));
+  if (match) {
+    const item = document.getElementById(`tag-item-${match.id}`);
+    if (item) {
+      item.classList.add('match-highlight');
+      item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+});
+
+init().then(async () => {
+  // Update invalid-variants indicator in header
+  try {
+    const inv = await api('/api/varianten/invalidiert');
+    const link = document.getElementById('inv-link');
+    if (link && inv.length > 0) {
+      link.textContent = `⚠ ${inv.length} invalid`;
+      link.style.color = '#e07070';
+      link.style.borderColor = '#e07070';
+    } else if (link) {
+      link.textContent = '✓ All valid';
+      link.style.color = '#6aaa60';
+      link.style.borderColor = '#6aaa60';
+    }
+  } catch(e) {}
+
+  const params = new URLSearchParams(location.search);
+
+  // ?xmlid_text=… → navigate to Text-Detail panel directly
+  const xmlidText = params.get('xmlid_text');
+  if (xmlidText) {
+    const docId = _docIdFromXmlId(decodeURIComponent(xmlidText));
+    showPanel('panel-texte');
+    await showTextDetail(docId);
+    history.replaceState({}, '', '/');
+  }
+
+  // ?edit_formula=ID → open formula for editing directly
+  const editId = params.get('edit_formula');
+  if (editId) {
+    const formula = formulae.find(i => i.id == editId);
+    if (formula) { openFormulaModal(formula); }
+    history.replaceState({}, '', '/');
+  }
+});
+</script>
+</body>
+</html>
