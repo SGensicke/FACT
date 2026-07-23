@@ -40,5 +40,7 @@ b) searching manually or creating a new formula on the fly
 - Individual variants can be edited directly from this view.
 - A bulk edit mode allows one or multiple variants to be reassigned to another existing formula or merged into a newly created one.
 
+![](https://github.com/SGensicke/FACT/blob/main/Docu/FACT_Inspect-02.png "FACT Text view")
+
 9. The Texts view provides a browsing interface for complete charters, allowing users to inspect individual diplomatic sections within their textual context. From each section, a direct link opens the annotation interface, enabling seamless switching between browsing and annotation.
 
