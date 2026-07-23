@@ -1,4 +1,6 @@
 # FACT
 FACT - Formulaic Language Annotation and Classification Tool
 
-![](https://github.com/SGensicke/FACT/blob/main/Docu/FACT_DEMO_Annotating.gif "Demonstration")
+<p align="center">
+  <img src="Docu/FACT_DEMO_Annotating.gif" alt="Demonstration" />
+</p>
