@@ -986,6 +986,11 @@ function selectionInfo(sel) {
 document.getElementById('text-body').addEventListener('click', (e) => {
   const span = e.target.closest('.linked-span');
   if (!span) return;
+  // A non-collapsed selection means the user just dragged out a new (possibly
+  // overlapping) selection rather than clicking to open — let the mouseup
+  // handler deal with it instead of popping the detail/overlap picker.
+  const activeSel = window.getSelection();
+  if (activeSel && !activeSel.isCollapsed) return;
   e.stopPropagation();
   const allIds = span.dataset.allVariantIds ? span.dataset.allVariantIds.split(',').map(Number) : null;
   if (allIds && allIds.length > 1) {
@@ -1017,7 +1022,6 @@ function showOverlapPicker(span, variantIds) {
 
 document.addEventListener('mouseup', (e) => {
   if (isDragging) { endDrag(e); return; }
-  if (e.target.closest('.linked-span')) return;
   if (e.target.closest('#suggestion-body')) return;
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed) return;

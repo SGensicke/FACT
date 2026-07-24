@@ -79,6 +79,10 @@
     <div class="panel" id="panel-texte">
       <div class="toolbar">
         <h2>Texts</h2>
+        <div class="sort-toggle" title="How selected Tags are combined">
+          <button id="tagmatch-btn-or"  class="sort-btn active" onclick="setTagMatchMode('or')">Tags: OR</button>
+          <button id="tagmatch-btn-and" class="sort-btn"        onclick="setTagMatchMode('and')">Tags: AND</button>
+        </div>
         <span id="text-count" class="formulae-count"></span>
         <div class="search-wrap">
           <input id="text-search" placeholder="Search xml:id…" oninput="renderTextsGrid()">
@@ -1573,6 +1577,16 @@ async function loadTexts() {
   renderTextsGrid();
 }
 
+// Tag combination mode for the Texts view: 'or' (any selected tag) | 'and' (all selected tags)
+let textsTagMatchMode = 'or';
+
+function setTagMatchMode(mode) {
+  textsTagMatchMode = mode;
+  document.getElementById('tagmatch-btn-or').classList.toggle('active', mode === 'or');
+  document.getElementById('tagmatch-btn-and').classList.toggle('active', mode === 'and');
+  renderTextsGrid();
+}
+
 // Master list for client-side filtering
 let _allTexts = [];
 let _filteredTextDocs = [];
@@ -1699,9 +1713,12 @@ function renderTextsGrid() {
   const includeTagIds = [...activeTags.entries()].filter(([,state]) => state === 1).map(([id]) => id);
   const excludeTagIds = [...activeTags.entries()].filter(([,state]) => state === -1).map(([id]) => id);
   if (includeTagIds.length) {
-    data = data.filter(t =>
-      (t.tag_ids_list || []).some(id => includeTagIds.includes(id))
-    );
+    data = data.filter(t => {
+      const list = t.tag_ids_list || [];
+      return textsTagMatchMode === 'and'
+        ? includeTagIds.every(id => list.includes(id))
+        : includeTagIds.some(id => list.includes(id));
+    });
   }
   if (excludeTagIds.length) {
     data = data.filter(t =>

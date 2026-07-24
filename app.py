@@ -847,10 +847,16 @@ def get_xml_element():
         all_xmlids = [xmlid] + [s["xmlid"] for s in sections if s["xmlid"]]
         placeholders = ",".join("?" * len(all_xmlids))
         variants = db.execute(f"""
-            SELECT v.*, f.formula as formulierung, t.name as kat_name
+            SELECT v.*, f.formula as formulierung,
+                   (SELECT GROUP_CONCAT(t2.name)
+                    FROM formula_tags ft JOIN tags t2 ON t2.id=ft.tag_id
+                    WHERE ft.formula_id=v.formula_id) as kat_name,
+                   (SELECT tg.color
+                    FROM formula_tags ft2 JOIN tags tg ON tg.id=ft2.tag_id
+                    WHERE ft2.formula_id=v.formula_id AND tg.color IS NOT NULL
+                    LIMIT 1) as tag_color
             FROM variants v
             JOIN formulae f ON f.id = v.formula_id
-            LEFT JOIN tags t ON t.id = f.tag_id
             WHERE v.text_xmlid IN ({placeholders})
         """, all_xmlids).fetchall()
 
