@@ -1,49 +1,131 @@
 from flask import Flask, request, jsonify, render_template, session, has_request_context
-import sqlite3, os, re
+import json as _json, sqlite3, os, re, uuid
 from lxml import etree
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FACT_SECRET_KEY", "fact-local-project-session")
 APP_DIR = os.path.dirname(__file__)
-DEFAULT_DB = os.path.join(APP_DIR, "variantendb.sqlite")
-DEFAULT_XML_DIR = os.path.join(APP_DIR, "xml")
 PROJECTS_DIR = os.path.join(APP_DIR, "projects")
+PROJECT_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+PROJECT_MANIFEST = ".fact-project.json"
+
+def _read_project_manifest(project_dir):
+    try:
+        with open(os.path.join(project_dir, PROJECT_MANIFEST), encoding="utf-8") as manifest_file:
+            manifest = _json.load(manifest_file)
+        if (isinstance(manifest, dict)
+                and isinstance(manifest.get("id"), str)
+                and PROJECT_ID_PATTERN.fullmatch(manifest["id"])
+                and isinstance(manifest.get("name"), str)):
+            return manifest
+    except (OSError, ValueError):
+        pass
+    return None
+
+def _write_project_manifest(project_dir, project_id, name):
+    manifest_path = os.path.join(project_dir, PROJECT_MANIFEST)
+    temp_path = manifest_path + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as manifest_file:
+        _json.dump({"id": project_id, "name": name}, manifest_file, ensure_ascii=True, indent=2)
+    os.replace(temp_path, manifest_path)
+
+def _is_fact_project_db(db_path):
+    if not os.path.isfile(db_path):
+        return False
+    try:
+        db = sqlite3.connect(f"file:{os.path.abspath(db_path)}?mode=ro", uri=True)
+        try:
+            required = {
+                "tags": {"id", "name"},
+                "formulae": {"id", "formula"},
+                "variants": {"id", "formula_id", "text_xmlid", "string"},
+            }
+            return all(
+                columns.issubset({row[1] for row in db.execute(f"PRAGMA table_info({table})")})
+                for table, columns in required.items()
+            )
+        finally:
+            db.close()
+    except sqlite3.DatabaseError:
+        return False
+
+def _project_directories():
+    if not os.path.isdir(PROJECTS_DIR):
+        return
+    with os.scandir(PROJECTS_DIR) as entries:
+        for entry in entries:
+            if entry.is_dir() and _is_fact_project_db(os.path.join(entry.path, "variantendb.sqlite")):
+                yield entry.path
+
+def _ensure_project_manifest(project_dir):
+    manifest = _read_project_manifest(project_dir)
+    if manifest:
+        return manifest
+    folder_name = os.path.basename(project_dir)
+    project_id = folder_name if PROJECT_ID_PATTERN.fullmatch(folder_name) else uuid.uuid4().hex
+    project_name = folder_name.replace("_", " ").replace("-", " ").title()
+    _write_project_manifest(project_dir, project_id, project_name)
+    return {"id": project_id, "name": project_name}
+
+def _find_project_dir(project_id):
+    if project_id == "default":
+        default_dir = os.path.join(PROJECTS_DIR, "default")
+        manifest = _read_project_manifest(default_dir)
+        if manifest and manifest["id"] == "default":
+            return default_dir
+    for project_dir in _project_directories() or ():
+        manifest = _ensure_project_manifest(project_dir)
+        if manifest["id"] == project_id:
+            return project_dir
+    return None
 
 def _project_paths(project_id=None):
-    project_id = project_id or (
-        session.get("project_id", "default") if has_request_context() else "default"
-    )
-    if project_id == "default":
-        return DEFAULT_DB, DEFAULT_XML_DIR
-    if not isinstance(project_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", project_id):
+    if project_id is None:
+        project_id = session.get("project_id", "default") if has_request_context() else "default"
+    if not isinstance(project_id, str) or not PROJECT_ID_PATTERN.fullmatch(project_id):
         raise ValueError("Invalid project id")
-    project_dir = os.path.join(PROJECTS_DIR, project_id)
+    project_dir = _find_project_dir(project_id)
+    if not project_dir:
+        raise FileNotFoundError("Project not found")
     return os.path.join(project_dir, "variantendb.sqlite"), os.path.join(project_dir, "xml")
 
 def get_xml_dir():
     return _project_paths()[1]
 
 def _project_list():
-    projects = [{"id": "default", "name": "Default"}]
-    if os.path.isdir(PROJECTS_DIR):
-        for project_id in sorted(os.listdir(PROJECTS_DIR)):
-            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", project_id):
-                continue
-            db_path, _ = _project_paths(project_id)
-            if os.path.isfile(db_path):
-                projects.append({"id": project_id, "name": project_id.replace("-", " ").title()})
-    return projects
+    projects = []
+    for project_dir in _project_directories() or ():
+        manifest = _ensure_project_manifest(project_dir)
+        projects.append({"id": manifest["id"], "name": manifest["name"]})
+    return sorted(projects, key=lambda project: (project["id"] != "default", project["name"].casefold()))
 
 # ── Database setup ────────────────────────────────────────────────────────────
 
 def get_db(db_path=None):
-    db_path = db_path or _project_paths()[0]
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    if db_path is None:
+        db_path = _project_paths()[0]
+    else:
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+class _ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+def _ensure_default_project():
+    os.makedirs(PROJECTS_DIR, exist_ok=True)
+    if _find_project_dir("default"):
+        return
+    project_dir = os.path.join(PROJECTS_DIR, "default")
+    os.makedirs(project_dir, exist_ok=True)
+    _write_project_manifest(project_dir, "default", "Default")
 
 def init_db(db_path=None):
     with get_db(db_path) as db:
@@ -102,11 +184,10 @@ def init_db(db_path=None):
         except sqlite3.OperationalError:
             pass
 
+_ensure_default_project()
 init_db()
 
 # ── XML Cache ─────────────────────────────────────────────────────────────────
-
-import json as _json
 
 def _inner_xml(el):
     """Returns the inner XML content of an element (without the outermost tag)."""
@@ -309,6 +390,14 @@ def _verify_all_variants(db):
 
 build_xml_cache()
 
+@app.before_request
+def reset_missing_project_session():
+    project_id = session.get("project_id", "default")
+    try:
+        _project_paths(project_id)
+    except (FileNotFoundError, ValueError):
+        session["project_id"] = "default"
+
 # ── API endpoints ─────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -326,18 +415,21 @@ def create_project():
     else:
         name = request.form.get("name", "").strip()
         database_file = request.files.get("database")
-    project_id = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-_")
-    if not project_id:
+    folder_name = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-_")
+    if not folder_name:
         return jsonify({"error": "Project name must contain letters or numbers"}), 400
-    if len(project_id) > 64:
+    if len(folder_name) > 64:
         return jsonify({"error": "Project name is too long"}), 400
-    db_path, xml_dir = _project_paths(project_id)
-    if os.path.exists(db_path):
+    if database_file and database_file.filename and not database_file.filename.lower().endswith((".sqlite", ".db")):
+        return jsonify({"error": "Choose a .sqlite or .db FACT database"}), 400
+    project_dir = os.path.join(PROJECTS_DIR, folder_name)
+    db_path = os.path.join(project_dir, "variantendb.sqlite")
+    xml_dir = os.path.join(project_dir, "xml")
+    if os.path.exists(project_dir):
         return jsonify({"error": "A project with that name already exists"}), 409
     os.makedirs(xml_dir, exist_ok=True)
+    project_id = uuid.uuid4().hex
     if database_file and database_file.filename:
-        if not database_file.filename.lower().endswith((".sqlite", ".db")):
-            return jsonify({"error": "Choose a .sqlite or .db FACT database"}), 400
         import tempfile
         temp_path = None
         try:
@@ -362,14 +454,27 @@ def create_project():
                 not required.issubset(columns[table])
                 for table, required in required_columns.items()
             ):
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    temp_path = None
+                os.rmdir(xml_dir)
+                os.rmdir(project_dir)
                 return jsonify({"error": "This is not a compatible FACT database"}), 400
             os.replace(temp_path, db_path)
             temp_path = None
         except sqlite3.DatabaseError:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+                temp_path = None
+            if os.path.isdir(xml_dir):
+                os.rmdir(xml_dir)
+            if os.path.isdir(project_dir):
+                os.rmdir(project_dir)
             return jsonify({"error": "This is not a readable SQLite database"}), 400
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
+    _write_project_manifest(project_dir, project_id, name)
     init_db(db_path)
     session["project_id"] = project_id
     if database_file and database_file.filename and any(
@@ -379,6 +484,33 @@ def create_project():
     return jsonify({"ok": True, "project": {"id": project_id, "name": name}}), 201
 
 
+@app.route("/api/projects/rename", methods=["POST"])
+def rename_project():
+    data = request.json or {}
+    project_id = data.get("id", "")
+    name = data.get("name", "")
+    if not isinstance(name, str):
+        return jsonify({"error": "Project name is required"}), 400
+    name = name.strip()
+    folder_name = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-_")
+    if not folder_name:
+        return jsonify({"error": "Project name must contain letters or numbers"}), 400
+    if len(folder_name) > 64:
+        return jsonify({"error": "Project name is too long"}), 400
+    try:
+        db_path, _ = _project_paths(project_id)
+    except (FileNotFoundError, ValueError):
+        return jsonify({"error": "Project not found"}), 404
+    current_dir = os.path.dirname(db_path)
+    new_dir = os.path.join(PROJECTS_DIR, folder_name)
+    if os.path.normcase(current_dir) != os.path.normcase(new_dir) and os.path.exists(new_dir):
+        return jsonify({"error": "A project folder with that name already exists"}), 409
+    if os.path.normcase(current_dir) != os.path.normcase(new_dir):
+        os.rename(current_dir, new_dir)
+    _write_project_manifest(new_dir, project_id, name)
+    return jsonify({"ok": True, "id": project_id, "name": name})
+
+
 @app.route("/api/projects/activate", methods=["POST"])
 def activate_project():
     project_id = (request.json or {}).get("id", "")
@@ -386,7 +518,7 @@ def activate_project():
         return jsonify({"error": "Project not found"}), 404
     try:
         db_path, xml_dir = _project_paths(project_id)
-    except ValueError:
+    except (FileNotFoundError, ValueError):
         return jsonify({"error": "Project not found"}), 404
     if project_id != "default" and not os.path.isfile(db_path):
         return jsonify({"error": "Project not found"}), 404
@@ -1239,6 +1371,22 @@ def get_xml_texte_compat():
 def import_page():
     return render_template("import.html")
 
+def _validate_current_fact_database(db):
+    required_columns = {
+        "tags": {"id", "name", "color"},
+        "formulae": {"id", "tag_id", "formula", "note"},
+        "formula_tags": {"formula_id", "tag_id"},
+        "variants": {
+            "id", "formula_id", "text_xmlid", "string", "string_xml",
+            "offset_start", "offset_end", "verified", "note", "tag_region",
+            "tag_section", "tag_label", "overlaps",
+        },
+    }
+    for table, required in required_columns.items():
+        columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        if not required.issubset(columns):
+            raise ValueError("Only databases using the current FACT schema can be imported")
+
 @app.route("/api/import/sqlite/preview", methods=["POST"])
 def import_sqlite_preview():
     if 'file' not in request.files:
@@ -1255,72 +1403,53 @@ def import_sqlite_preview():
         "varianten_neu": 0, "varianten_vorhanden": 0,
         "ist_eigene_db": False
     }
+    src = dst = None
     try:
         src = sqlite3.connect(tmp_path)
         src.row_factory = sqlite3.Row
+        _validate_current_fact_database(src)
         dst = get_db()
 
-        tag_map = {}
-        try:
-            for row in src.execute("SELECT * FROM kategorien").fetchall():
-                exist = dst.execute("SELECT id FROM tags WHERE name=?", (row["name"],)).fetchone()
-                if exist:
-                    tag_map[row["id"]] = exist["id"]
-                    preview["kategorien_vorhanden"].append(row["name"])
-                else:
-                    tag_map[row["id"]] = None
-                    preview["kategorien_neu"].append(row["name"])
-        except Exception:
-            pass
-
         formula_map = {}
-        try:
-            src_col = "formulierung" if "formulierung" in [c[1] for c in src.execute("PRAGMA table_info(ideale)").fetchall()] else "formula"
-            for row in src.execute("SELECT * FROM ideale").fetchall():
-                text = row[src_col]
-                exist = dst.execute("SELECT id FROM formulae WHERE formula=?", (text,)).fetchone()
-                if exist:
-                    formula_map[row["id"]] = exist["id"]
-                    preview["ideale_vorhanden"].append(text[:60])
-                else:
-                    formula_map[row["id"]] = None
-                    preview["ideale_neu"].append(text[:60])
-        except Exception:
-            pass
+        for row in src.execute("SELECT id, formula FROM formulae"):
+            exist = dst.execute("SELECT id FROM formulae WHERE formula=?", (row["formula"],)).fetchone()
+            formula_map[row["id"]] = exist["id"] if exist else None
+            if exist:
+                preview["ideale_vorhanden"].append(row["formula"][:60])
+            else:
+                preview["ideale_neu"].append(row["formula"][:60])
 
-        try:
-            variant_tbl = "varianten" if "varianten" in [r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else "variants"
-            id_col = "ideal_id" if "ideal_id" in [c[1] for c in src.execute(f"PRAGMA table_info({variant_tbl})").fetchall()] else "formula_id"
-            for row in src.execute(f"SELECT * FROM {variant_tbl}").fetchall():
-                dst_fid = formula_map.get(row[id_col])
-                if not dst_fid:
-                    preview["varianten_neu"] += 1
-                    continue
-                exist = dst.execute(
-                    "SELECT id FROM variants WHERE formula_id=? AND text_xmlid=? AND string=?",
-                    (dst_fid, row["text_xmlid"], row["string"])
-                ).fetchone()
-                if exist:
-                    preview["varianten_vorhanden"] += 1
-                else:
-                    preview["varianten_neu"] += 1
-        except Exception:
-            pass
+        for row in src.execute("SELECT id, name FROM tags"):
+            exist = dst.execute("SELECT id FROM tags WHERE name=?", (row["name"],)).fetchone()
+            key = "kategorien_vorhanden" if exist else "kategorien_neu"
+            preview[key].append(row["name"])
+
+        for row in src.execute("SELECT formula_id, text_xmlid, string FROM variants"):
+            dst_fid = formula_map.get(row["formula_id"])
+            if not dst_fid:
+                preview["varianten_neu"] += 1
+                continue
+            exist = dst.execute(
+                "SELECT id FROM variants WHERE formula_id=? AND text_xmlid=? AND string=?",
+                (dst_fid, row["text_xmlid"], row["string"])
+            ).fetchone()
+            if exist:
+                preview["varianten_vorhanden"] += 1
+            else:
+                preview["varianten_neu"] += 1
 
         if not preview["ideale_neu"] and not preview["varianten_neu"] and preview["varianten_vorhanden"] > 0:
             preview["ist_eigene_db"] = True
 
-        src.close(); dst.close()
-    except Exception as e:
-        try: src.close()
-        except: pass
-        try: dst.close()
-        except: pass
-        os.unlink(tmp_path)
-        return jsonify({"error": str(e)}), 500
+    except (sqlite3.DatabaseError, ValueError) as e:
+        return jsonify({"error": str(e)}), 400
     finally:
-        try: os.unlink(tmp_path)
-        except: pass
+        if src:
+            src.close()
+        if dst:
+            dst.close()
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     return jsonify(preview)
 
@@ -1336,88 +1465,86 @@ def import_sqlite():
 
     stats = {"kategorien": 0, "ideale": 0, "varianten": 0,
              "dubletten_ideale": 0, "dubletten_varianten": 0, "fehler": []}
+    src = dst = None
     try:
         src = sqlite3.connect(tmp_path)
         src.row_factory = sqlite3.Row
+        _validate_current_fact_database(src)
         dst = get_db()
         dst.execute("PRAGMA foreign_keys = ON")
 
-        # Tags (from source 'kategorien' table)
         tag_map = {}
-        try:
-            for row in src.execute("SELECT * FROM kategorien").fetchall():
-                exist = dst.execute("SELECT id FROM tags WHERE name=?", (row["name"],)).fetchone()
-                if exist:
-                    tag_map[row["id"]] = exist["id"]
-                else:
-                    cur = dst.execute("INSERT INTO tags (name) VALUES (?)", (row["name"],))
-                    tag_map[row["id"]] = cur.lastrowid
-                    stats["kategorien"] += 1
-            dst.commit()
-        except Exception as e:
-            stats["fehler"].append(f"Tags: {e}")
+        for row in src.execute("SELECT id, name, color FROM tags"):
+            exist = dst.execute("SELECT id FROM tags WHERE name=?", (row["name"],)).fetchone()
+            if exist:
+                tag_map[row["id"]] = exist["id"]
+            else:
+                cur = dst.execute("INSERT INTO tags (name, color) VALUES (?,?)", (row["name"], row["color"]))
+                tag_map[row["id"]] = cur.lastrowid
+                stats["kategorien"] += 1
+        dst.commit()
 
-        # Formulae (from source 'ideale' table)
         formula_map = {}
-        try:
-            src_cols = [c[1] for c in src.execute("PRAGMA table_info(ideale)").fetchall()]
-            form_col = "formulierung" if "formulierung" in src_cols else "formula"
-            note_col = "notiz" if "notiz" in src_cols else "note"
-            for row in src.execute("SELECT * FROM ideale").fetchall():
-                text = row[form_col]
-                exist = dst.execute("SELECT id FROM formulae WHERE formula=?", (text,)).fetchone()
-                if exist:
-                    formula_map[row["id"]] = exist["id"]
-                    stats["dubletten_ideale"] += 1
-                else:
-                    note = row[note_col] if note_col in src_cols else None
-                    cur = dst.execute("INSERT INTO formulae (formula, note) VALUES (?,?)", (text, note))
-                    formula_map[row["id"]] = cur.lastrowid
-                    stats["ideale"] += 1
-            dst.commit()
-        except Exception as e:
-            stats["fehler"].append(f"Formulae: {e}")
-
-        # Variants
-        try:
-            all_tables = [r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
-            variant_tbl = "varianten" if "varianten" in all_tables else "variants"
-            vcols = [c[1] for c in src.execute(f"PRAGMA table_info({variant_tbl})").fetchall()]
-            id_col = "ideal_id" if "ideal_id" in vcols else "formula_id"
-            for row in src.execute(f"SELECT * FROM {variant_tbl}").fetchall():
-                dst_fid = formula_map.get(row[id_col])
-                if not dst_fid:
-                    stats["fehler"].append(f"Variant {row['id']}: formula {row[id_col]} not mapped")
-                    continue
-                exist = dst.execute(
-                    "SELECT id FROM variants WHERE formula_id=? AND text_xmlid=? AND string=?",
-                    (dst_fid, row["text_xmlid"], row["string"])
-                ).fetchone()
-                if exist:
-                    stats["dubletten_varianten"] += 1
-                    continue
-                note_col = "notiz" if "notiz" in vcols else ("note" if "note" in vcols else None)
-                region_col  = "tag_region"   if "tag_region"   in vcols else None
-                section_col = "tag_textteil" if "tag_textteil" in vcols else ("tag_section" if "tag_section" in vcols else None)
-                dst.execute(
-                    """INSERT INTO variants
-                       (formula_id, text_xmlid, string, verified, note, tag_region, tag_section)
-                       VALUES (?,?,?,?,?,?,?)""",
-                    (dst_fid, row["text_xmlid"], row["string"],
-                     row["verifiziert"] if "verifiziert" in vcols else (row["verified"] if "verified" in vcols else 0),
-                     row[note_col] if note_col else None,
-                     row[region_col] if region_col else None,
-                     row[section_col] if section_col else None)
+        for row in src.execute("SELECT id, tag_id, formula, note FROM formulae"):
+            tag_id = tag_map.get(row["tag_id"])
+            exist = dst.execute("SELECT id FROM formulae WHERE formula=?", (row["formula"],)).fetchone()
+            if exist:
+                formula_map[row["id"]] = exist["id"]
+                stats["dubletten_ideale"] += 1
+            else:
+                cur = dst.execute(
+                    "INSERT INTO formulae (tag_id, formula, note) VALUES (?,?,?)",
+                    (tag_id, row["formula"], row["note"])
                 )
-                stats["varianten"] += 1
-            dst.commit()
-        except Exception as e:
-            stats["fehler"].append(f"Variants: {e}")
+                formula_map[row["id"]] = cur.lastrowid
+                stats["ideale"] += 1
+            if tag_id is not None:
+                dst.execute(
+                    "INSERT OR IGNORE INTO formula_tags (formula_id, tag_id) VALUES (?,?)",
+                    (formula_map[row["id"]], tag_id)
+                )
+        dst.commit()
 
-        dst.close()
+        for row in src.execute("SELECT formula_id, tag_id FROM formula_tags"):
+            formula_id = formula_map[row["formula_id"]]
+            tag_id = tag_map[row["tag_id"]]
+            dst.execute(
+                "INSERT OR IGNORE INTO formula_tags (formula_id, tag_id) VALUES (?,?)",
+                (formula_id, tag_id)
+            )
+        dst.commit()
+
+        variant_columns = (
+            "formula_id, text_xmlid, string, string_xml, offset_start, offset_end, "
+            "verified, note, tag_region, tag_section, tag_label, overlaps"
+        )
+        placeholders = ",".join("?" for _ in variant_columns.split(","))
+        for row in src.execute(f"SELECT {variant_columns} FROM variants"):
+            dst_fid = formula_map[row["formula_id"]]
+            exist = dst.execute(
+                "SELECT id FROM variants WHERE formula_id=? AND text_xmlid=? AND string=?",
+                (dst_fid, row["text_xmlid"], row["string"])
+            ).fetchone()
+            if exist:
+                stats["dubletten_varianten"] += 1
+                continue
+            dst.execute(
+                f"INSERT INTO variants ({variant_columns}) VALUES ({placeholders})",
+                (dst_fid,) + tuple(row[key] for key in variant_columns.split(", ")[1:])
+            )
+            stats["varianten"] += 1
+        dst.commit()
+    except (sqlite3.DatabaseError, ValueError) as e:
+        if dst:
+            dst.rollback()
+        return jsonify({"ok": False, "error": str(e)}), 400
     finally:
-        src.close()
-        os.unlink(tmp_path)
+        if src:
+            src.close()
+        if dst:
+            dst.close()
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
     stats["hinweis"] = None
     if stats["dubletten_ideale"] > 0 or stats["dubletten_varianten"] > 0:
@@ -1500,5 +1627,5 @@ def import_csv():
 
 
 if __name__ == "__main__":
-    os.makedirs(DEFAULT_XML_DIR, exist_ok=True)
+    os.makedirs(get_xml_dir(), exist_ok=True)
     app.run(debug=True, port=5000)

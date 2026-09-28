@@ -26,6 +26,7 @@
         </select>
       </label>
       <button class="header-btn" onclick="createProject()" title="Create a separate project">+ Project</button>
+      <button class="header-btn" onclick="renameProject()" title="Rename the selected project">✎ Rename</button>
       <a href="/annotate" class="header-btn" title="Open Annotation and Linking Editor">⇄ Annotate &amp; Link</a>
       <a href="/import" class="header-btn" title="Import files">↑ Import</a>
       <a href="/invalid" target="_blank" id="inv-link" class="header-btn" title="Show invalid variants">⚠ Validation pending</a>
@@ -1988,6 +1989,24 @@ async function createProject() {
   const result = await response.json();
   if (!response.ok) {
     alert(result.error || 'Could not create project');
+    return;
+  }
+  location.reload();
+}
+
+async function renameProject() {
+  const select = document.getElementById('project-select');
+  const projectId = select.value;
+  const currentName = select.options[select.selectedIndex].text;
+  const name = prompt('New project name', currentName);
+  if (!name?.trim() || name.trim() === currentName) return;
+  const response = await fetch('/api/projects/rename', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: projectId, name: name.trim()})
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(result.error || 'Could not rename project');
     return;
   }
   location.reload();
