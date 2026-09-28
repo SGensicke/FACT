@@ -1,21 +1,52 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session, has_request_context
 import sqlite3, os, re
 from lxml import etree
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
-DB = os.path.join(os.path.dirname(__file__), "variantendb.sqlite")
-XML_DIR = os.path.join(os.path.dirname(__file__), "xml")
+app.secret_key = os.environ.get("FACT_SECRET_KEY", "fact-local-project-session")
+APP_DIR = os.path.dirname(__file__)
+DEFAULT_DB = os.path.join(APP_DIR, "variantendb.sqlite")
+DEFAULT_XML_DIR = os.path.join(APP_DIR, "xml")
+PROJECTS_DIR = os.path.join(APP_DIR, "projects")
+
+def _project_paths(project_id=None):
+    project_id = project_id or (
+        session.get("project_id", "default") if has_request_context() else "default"
+    )
+    if project_id == "default":
+        return DEFAULT_DB, DEFAULT_XML_DIR
+    if not isinstance(project_id, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", project_id):
+        raise ValueError("Invalid project id")
+    project_dir = os.path.join(PROJECTS_DIR, project_id)
+    return os.path.join(project_dir, "variantendb.sqlite"), os.path.join(project_dir, "xml")
+
+def get_xml_dir():
+    return _project_paths()[1]
+
+def _project_list():
+    projects = [{"id": "default", "name": "Default"}]
+    if os.path.isdir(PROJECTS_DIR):
+        for project_id in sorted(os.listdir(PROJECTS_DIR)):
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", project_id):
+                continue
+            db_path, _ = _project_paths(project_id)
+            if os.path.isfile(db_path):
+                projects.append({"id": project_id, "name": project_id.replace("-", " ").title()})
+    return projects
 
 # ── Database setup ────────────────────────────────────────────────────────────
 
-def get_db():
-    conn = sqlite3.connect(DB)
+def get_db(db_path=None):
+    db_path = db_path or _project_paths()[0]
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
-def init_db():
-    with get_db() as db:
+def init_db(db_path=None):
+    with get_db(db_path) as db:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS tags (
             id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,10 +96,11 @@ def init_db():
         );
         """)
     # Migrate: add color column to tags if it doesn't exist yet
-    try:
-        db.execute("ALTER TABLE tags ADD COLUMN color TEXT")
-    except Exception:
-        pass  # column already exists
+    with get_db(db_path) as db:
+        try:
+            db.execute("ALTER TABLE tags ADD COLUMN color TEXT")
+        except sqlite3.OperationalError:
+            pass
 
 init_db()
 
@@ -115,7 +147,8 @@ def _compute_string_xml(text_xmlid, offset_start, offset_end):
 
 def build_xml_cache():
     """Reads all XML files and rebuilds xml_cache. Runs on every start."""
-    if not os.path.isdir(XML_DIR):
+    xml_dir = get_xml_dir()
+    if not os.path.isdir(xml_dir):
         return
     entries = []
     with get_db() as db:
@@ -149,11 +182,11 @@ def build_xml_cache():
             pass
 
         pos = 0
-        for fname in sorted(os.listdir(XML_DIR)):
+        for fname in sorted(os.listdir(xml_dir)):
             if not fname.endswith(".xml"):
                 continue
             try:
-                tree = etree.parse(os.path.join(XML_DIR, fname))
+                tree = etree.parse(os.path.join(xml_dir, fname))
                 root = tree.getroot()
                 for el in root.iter():
                     xmlid = el.get("{http://www.w3.org/XML/1998/namespace}id")
@@ -191,13 +224,14 @@ def extract_tags(text_xmlid):
             return row["tag_region"], row["tag_section"]
         tag_region = _region_from_xmlid(text_xmlid, db)
     tag_section = None
-    if os.path.isdir(XML_DIR):
+    xml_dir = get_xml_dir()
+    if os.path.isdir(xml_dir):
         ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
-        for fname in sorted(os.listdir(XML_DIR)):
+        for fname in sorted(os.listdir(xml_dir)):
             if not fname.endswith(".xml"):
                 continue
             try:
-                tree = etree.parse(os.path.join(XML_DIR, fname))
+                tree = etree.parse(os.path.join(xml_dir, fname))
                 elems = tree.getroot().xpath(f'//*[@xml:id="{text_xmlid}"]', namespaces=ns)
                 if elems:
                     tag_section = etree.QName(elems[0].tag).localname
@@ -279,7 +313,122 @@ build_xml_cache()
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    projects = _project_list()
+    active_project = session.get("project_id", "default")
+    return render_template("index.html", projects=projects, active_project=active_project)
+
+
+@app.route("/api/projects", methods=["POST"])
+def create_project():
+    if request.is_json:
+        name = (request.json or {}).get("name", "").strip()
+        database_file = None
+    else:
+        name = request.form.get("name", "").strip()
+        database_file = request.files.get("database")
+    project_id = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-_")
+    if not project_id:
+        return jsonify({"error": "Project name must contain letters or numbers"}), 400
+    if len(project_id) > 64:
+        return jsonify({"error": "Project name is too long"}), 400
+    db_path, xml_dir = _project_paths(project_id)
+    if os.path.exists(db_path):
+        return jsonify({"error": "A project with that name already exists"}), 409
+    os.makedirs(xml_dir, exist_ok=True)
+    if database_file and database_file.filename:
+        if not database_file.filename.lower().endswith((".sqlite", ".db")):
+            return jsonify({"error": "Choose a .sqlite or .db FACT database"}), 400
+        import tempfile
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=os.path.dirname(db_path), suffix=".sqlite", delete=False) as temp:
+                temp_path = temp.name
+            database_file.save(temp_path)
+            source = sqlite3.connect(temp_path)
+            try:
+                integrity = source.execute("PRAGMA quick_check").fetchone()[0]
+                columns = {
+                    table: {row[1] for row in source.execute(f"PRAGMA table_info({table})")}
+                    for table in ("tags", "formulae", "variants")
+                }
+            finally:
+                source.close()
+            required_columns = {
+                "tags": {"id", "name"},
+                "formulae": {"id", "formula"},
+                "variants": {"id", "formula_id", "text_xmlid", "string"},
+            }
+            if integrity != "ok" or any(
+                not required.issubset(columns[table])
+                for table, required in required_columns.items()
+            ):
+                return jsonify({"error": "This is not a compatible FACT database"}), 400
+            os.replace(temp_path, db_path)
+            temp_path = None
+        except sqlite3.DatabaseError:
+            return jsonify({"error": "This is not a readable SQLite database"}), 400
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+    init_db(db_path)
+    session["project_id"] = project_id
+    if database_file and database_file.filename and any(
+        filename.endswith(".xml") for filename in os.listdir(xml_dir)
+    ):
+        build_xml_cache()
+    return jsonify({"ok": True, "project": {"id": project_id, "name": name}}), 201
+
+
+@app.route("/api/projects/activate", methods=["POST"])
+def activate_project():
+    project_id = (request.json or {}).get("id", "")
+    if not isinstance(project_id, str) or not project_id:
+        return jsonify({"error": "Project not found"}), 404
+    try:
+        db_path, xml_dir = _project_paths(project_id)
+    except ValueError:
+        return jsonify({"error": "Project not found"}), 404
+    if project_id != "default" and not os.path.isfile(db_path):
+        return jsonify({"error": "Project not found"}), 404
+    session["project_id"] = project_id
+    if os.path.isdir(xml_dir) and any(name.endswith(".xml") for name in os.listdir(xml_dir)):
+        with get_db() as db:
+            cached_count = db.execute("SELECT COUNT(*) FROM xml_cache").fetchone()[0]
+        if not cached_count:
+            build_xml_cache()
+    return jsonify({"ok": True, "id": project_id})
+
+
+@app.route("/api/projects/xml", methods=["POST"])
+def upload_project_xml():
+    files = request.files.getlist("files")
+    if not files or not any(file.filename for file in files):
+        return jsonify({"error": "Choose one or more XML files"}), 400
+    xml_dir = get_xml_dir()
+    os.makedirs(xml_dir, exist_ok=True)
+    imported, errors = [], []
+    import tempfile
+    for file in files:
+        filename = secure_filename(file.filename or "")
+        if not filename.lower().endswith(".xml"):
+            errors.append(file.filename or "(unnamed file)")
+            continue
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=xml_dir, suffix=".xml", delete=False) as temp:
+                temp_path = temp.name
+            file.save(temp_path)
+            etree.parse(temp_path)
+            os.replace(temp_path, os.path.join(xml_dir, filename))
+            imported.append(filename)
+        except Exception:
+            errors.append(file.filename or filename)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+    if imported:
+        build_xml_cache()
+    return jsonify({"ok": bool(imported), "files": imported, "errors": errors}), (200 if imported else 400)
 
 
 # Tags
@@ -649,12 +798,13 @@ def search_texts():
 @app.route("/api/xml_ids", methods=["GET"])
 def get_xml_ids():
     ids = []
-    if os.path.isdir(XML_DIR):
+    xml_dir = get_xml_dir()
+    if os.path.isdir(xml_dir):
         ns = {"xml": "http://www.w3.org/XML/1998/namespace"}
-        for fname in sorted(os.listdir(XML_DIR)):
+        for fname in sorted(os.listdir(xml_dir)):
             if fname.endswith(".xml"):
                 try:
-                    tree = etree.parse(os.path.join(XML_DIR, fname))
+                    tree = etree.parse(os.path.join(xml_dir, fname))
                     found = tree.getroot().xpath('//*/@xml:id', namespaces=ns)
                     ids.extend(found)
                 except Exception:
@@ -824,7 +974,7 @@ def get_xml_element():
             return {"tag": tag, "xmlid": xmlid, "inner": inner_root}
 
         try:
-            tree = etree.parse(os.path.join(XML_DIR, file_name))
+            tree = etree.parse(os.path.join(get_xml_dir(), file_name))
             elems = tree.getroot().xpath(f'//*[@xml:id="{xmlid}"]', namespaces=ns)
             if elems:
                 el = elems[0]
@@ -1350,5 +1500,5 @@ def import_csv():
 
 
 if __name__ == "__main__":
-    os.makedirs(XML_DIR, exist_ok=True)
+    os.makedirs(DEFAULT_XML_DIR, exist_ok=True)
     app.run(debug=True, port=5000)

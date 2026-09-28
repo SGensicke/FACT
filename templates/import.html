@@ -83,6 +83,50 @@ header h1 { font-size: 1.2rem; font-weight: 500; }
 
 <div class="container">
 
+  <!-- Project database -->
+  <div class="import-section">
+    <div class="import-head">
+      <h2>Open a FACT Database as a Project</h2>
+      <span class="badge">.sqlite / .db</span>
+    </div>
+    <div class="import-body">
+      <p>Creates an isolated project with a copy of the selected database. The original file is not changed.</p>
+      <div class="field" style="margin-bottom:.75rem">
+        <label for="project-db-name">Project name</label>
+        <input id="project-db-name" placeholder="e.g. Amiens corpus" style="width:100%;padding:.5rem;border:1px solid var(--border);border-radius:3px;font:inherit">
+      </div>
+      <div class="drop-zone" id="project-db-drop">
+        <span class="dz-icon">🗄</span>
+        Drop a FACT database here, or click to choose
+        <input type="file" id="project-db-file" accept=".sqlite,.db" onchange="projectDatabaseSelected()">
+      </div>
+      <div style="margin-top:.75rem">
+        <button class="btn btn-primary" id="project-db-btn" onclick="createProjectFromDatabase()" disabled>Create Project</button>
+      </div>
+      <div class="result-box" id="project-db-result"></div>
+    </div>
+  </div>
+
+  <!-- XML texts -->
+  <div class="import-section">
+    <div class="import-head">
+      <h2>Project XML Texts</h2>
+      <span class="badge">.xml</span>
+    </div>
+    <div class="import-body">
+      <p>XML files are stored with the active project and indexed for annotation.</p>
+      <div class="drop-zone" id="xml-drop">
+        <span class="dz-icon">▤</span>
+        Drop XML files here, or click to choose
+        <input type="file" id="xml-file" accept=".xml,application/xml,text/xml" multiple onchange="xmlFilesSelected()">
+      </div>
+      <div style="margin-top:.75rem">
+        <button class="btn btn-primary" id="xml-btn" onclick="uploadXmlFiles()" disabled>Upload XML</button>
+      </div>
+      <div class="result-box" id="xml-result"></div>
+    </div>
+  </div>
+
   <!-- SQLite -->
   <div class="import-section">
     <div class="import-head">
@@ -225,15 +269,17 @@ function csvFileSelected() {
 }
 
 // ── Drag-over styling ──────────────────────────────────────────────────────
-['sqlite-drop', 'csv-drop'].forEach(id => {
+['project-db-drop', 'xml-drop', 'sqlite-drop', 'csv-drop'].forEach(id => {
   const el = document.getElementById(id);
   el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
   el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
   el.addEventListener('drop', e => {
     e.preventDefault(); el.classList.remove('drag-over');
-    const type = id.startsWith('sqlite') ? 'sqlite' : 'csv';
+    const type = id.startsWith('project-db') ? 'project-db' : id.startsWith('sqlite') ? 'sqlite' : id.startsWith('xml') ? 'xml' : 'csv';
     document.getElementById(type + '-file').files = e.dataTransfer.files;
     if (type === 'sqlite') sqliteFileSelected();
+    else if (type === 'project-db') projectDatabaseSelected();
+    else if (type === 'xml') xmlFilesSelected();
     else csvFileSelected();
   });
 });
@@ -299,6 +345,63 @@ async function doImport(type) {
 function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+<script>
+function projectDatabaseSelected() {
+  document.getElementById('project-db-btn').disabled = !document.getElementById('project-db-file').files.length;
+}
+
+async function createProjectFromDatabase() {
+  const name = document.getElementById('project-db-name').value.trim();
+  const input = document.getElementById('project-db-file');
+  if (!name || !input.files.length) return;
+  const formData = new FormData();
+  formData.append('name', name);
+  formData.append('database', input.files[0]);
+  const button = document.getElementById('project-db-btn');
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/projects', {method: 'POST', body: formData});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not create project');
+    location.href = '/';
+  } catch (error) {
+    const resultBox = document.getElementById('project-db-result');
+    resultBox.className = 'result-box err';
+    resultBox.textContent = error.message;
+    resultBox.style.display = 'block';
+    button.disabled = false;
+  }
+}
+
+function xmlFilesSelected() {
+  document.getElementById('xml-btn').disabled = !document.getElementById('xml-file').files.length;
+}
+
+async function uploadXmlFiles() {
+  const input = document.getElementById('xml-file');
+  if (!input.files.length) return;
+  const formData = new FormData();
+  for (const file of input.files) formData.append('files', file);
+  const button = document.getElementById('xml-btn');
+  const resultBox = document.getElementById('xml-result');
+  button.disabled = true;
+  button.textContent = 'Uploading…';
+  try {
+    const response = await fetch('/api/projects/xml', {method: 'POST', body: formData});
+    const result = await response.json();
+    resultBox.className = `result-box ${result.ok ? 'ok' : 'err'}`;
+    resultBox.innerHTML = result.ok
+      ? `<strong>${result.files.length} XML file(s) added and indexed.</strong>${result.errors.length ? `<br>Skipped: ${result.errors.map(esc).join(', ')}` : ''}`
+      : `<strong>${esc(result.error || 'No valid XML files were uploaded.')}</strong>`;
+  } catch (error) {
+    resultBox.className = 'result-box err';
+    resultBox.textContent = `Upload failed: ${error.message}`;
+  }
+  resultBox.style.display = 'block';
+  button.disabled = false;
+  button.textContent = 'Upload XML';
 }
 </script>
 </body>

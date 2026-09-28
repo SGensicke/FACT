@@ -44,3 +44,9 @@ b) searching manually or creating a new formula on the fly
 
 9. The Texts view provides a browsing interface for complete charters, allowing users to inspect individual diplomatic sections within their textual context. From each section, a direct link opens the annotation interface, enabling seamless switching between browsing and annotation.
 
+## Projects
+
+The application keeps the existing `variantendb.sqlite` and `xml/` as the `Default` project. Use **+ Project** in the overview to create an empty project, or open **Import** and choose **Open a FACT Database as a Project** to make a separate copy of a compatible FACT database. Projects are stored under `projects/<project-name>/`, with a `variantendb.sqlite` database and an `xml/` directory for that project's source texts. Use the project selector in the overview to switch the active project. XML files uploaded from the Import page are saved in the active project's `xml/` directory and indexed there.
+
+The database project option copies the selected SQLite file into the project folder; it does not modify or continuously synchronize the source file. Existing SQLite and CSV import options continue to merge records into the active project.
+

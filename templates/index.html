@@ -16,6 +16,16 @@
     <h1>FACT</h1>
     <span class="sub">Formulaic Language Annotation and Classification Tool</span>
     <div class="header-actions">
+      <label class="header-btn" style="display:flex;align-items:center;gap:.45rem">
+        Project
+        <select id="project-select" onchange="switchProject(this.value)"
+          style="font:inherit;color:inherit;background:transparent;border:0;max-width:150px">
+          {% for project in projects %}
+          <option value="{{ project.id }}" {% if project.id == active_project %}selected{% endif %}>{{ project.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="header-btn" onclick="createProject()" title="Create a separate project">+ Project</button>
       <a href="/annotate" class="header-btn" title="Open Annotation and Linking Editor">⇄ Annotate &amp; Link</a>
       <a href="/import" class="header-btn" title="Import files">↑ Import</a>
       <a href="/invalid" target="_blank" id="inv-link" class="header-btn" title="Show invalid variants">⚠ Validation pending</a>
@@ -1952,6 +1962,36 @@ init().then(async () => {
     history.replaceState({}, '', '/');
   }
 });
+</script>
+<script>
+async function switchProject(projectId) {
+  const response = await fetch('/api/projects/activate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({id: projectId})
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(result.error || 'Could not switch project');
+    location.reload();
+    return;
+  }
+  location.reload();
+}
+
+async function createProject() {
+  const name = prompt('Project name');
+  if (!name?.trim()) return;
+  const response = await fetch('/api/projects', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name: name.trim()})
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    alert(result.error || 'Could not create project');
+    return;
+  }
+  location.reload();
+}
 </script>
 </body>
 </html>
