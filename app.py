@@ -193,8 +193,12 @@ def _inner_xml(el):
     """Returns the inner XML content of an element (without the outermost tag)."""
     raw = etree.tostring(el, encoding='unicode')
     i = raw.index('>') + 1
-    j = raw.rindex('</')
-    return raw[i:j]
+    try:
+        j = raw.rindex('</')
+        return raw[i:j]
+    except ValueError:
+        # Empty element (e.g., <tenor/> or <tenor></tenor>)
+        return ""
 
 def _plaintext_preview(inner):
     """Short preview text: strip tags, normalize whitespace."""
@@ -1259,6 +1263,62 @@ def get_formula_variants(fid):
     })
 
 
+@app.route("/api/formulae/<int:fid>/stats", methods=["GET"])
+def get_formula_stats(fid):
+    """Distribution statistics for a formula: how often it occurs per region,
+    diplomatic section and document."""
+    with get_db() as db:
+        formula = db.execute("SELECT * FROM formulae WHERE id=?", (fid,)).fetchone()
+        if not formula:
+            return jsonify({"error": "not found"}), 404
+        reg_map = {r["abbr"]: r["name"] for r in
+                   db.execute("SELECT abbr, name FROM regions").fetchall()}
+        rows = db.execute(
+            "SELECT tag_region, tag_section, text_xmlid FROM variants WHERE formula_id=?",
+            (fid,)
+        ).fetchall()
+        tag_rows = db.execute(
+            "SELECT t.id, t.name, t.color FROM formula_tags ft "
+            "JOIN tags t ON t.id=ft.tag_id WHERE ft.formula_id=? ORDER BY t.name",
+            (fid,)
+        ).fetchall()
+
+    name_set = set(reg_map.values())
+    region_counts, section_counts, doc_counts = {}, {}, {}
+    for r in rows:
+        raw = r["tag_region"]
+        if raw:
+            region = raw if raw in name_set else reg_map.get(raw, raw)
+        else:
+            region = "(unknown)"
+        region_counts[region] = region_counts.get(region, 0) + 1
+        section = r["tag_section"] or "(unknown)"
+        section_counts[section] = section_counts.get(section, 0) + 1
+        doc = _doc_id_from_xmlid(r["text_xmlid"]) or r["text_xmlid"]
+        doc_counts[doc] = doc_counts.get(doc, 0) + 1
+
+    total = len(rows)
+
+    def to_list(counts):
+        return sorted(
+            [{"label": k, "count": v,
+              "pct": round(100 * v / total, 1) if total else 0}
+             for k, v in counts.items()],
+            key=lambda x: (-x["count"], x["label"])
+        )
+
+    return jsonify({
+        "formula_id": fid,
+        "formula": formula["formula"],
+        "note": formula["note"],
+        "tags": [dict(t) for t in tag_rows],
+        "total": total,
+        "regions": to_list(region_counts),
+        "sections": to_list(section_counts),
+        "documents": to_list(doc_counts),
+    })
+
+
 # Legacy route aliases (so existing JS doesn't break)
 @app.route("/api/ideale", methods=["GET"])
 def get_ideale_compat():
@@ -1356,6 +1416,10 @@ def post_region_compat():
 @app.route("/api/ideale/<int:iid>/varianten", methods=["GET"])
 def get_ideal_varianten_compat(iid):
     return get_formula_variants(iid)
+
+@app.route("/api/ideale/<int:iid>/stats", methods=["GET"])
+def get_ideal_stats_compat(iid):
+    return get_formula_stats(iid)
 
 @app.route("/api/xml_baum", methods=["GET"])
 def get_xml_baum_compat():

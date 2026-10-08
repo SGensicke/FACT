@@ -252,6 +252,17 @@
   </div>
 </div>
 
+<!-- Modal: Variant statistics -->
+<div class="overlay" id="stats-overlay">
+  <div class="modal modal-large">
+    <div class="stats-head">
+      <h3 id="stats-title">Variant Statistics</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeVariantStats()" title="Close">✕</button>
+    </div>
+    <div id="stats-body"></div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1670,7 +1681,10 @@ function renderAnnotatedText(inner, xmlid, variants = []) {
     const style = color ? `background:${hexToRgba(color, 0.25)};border-bottom:2px solid ${hexToRgba(color, 0.7)};` : '';
     const title = esc((v.formulierung || '') + (v.kategorie_names ? ' [' + v.kategorie_names + ']' : ''));
     const classes = 'linked-span' + (overlaps ? ' overlaps' : '');
-    html += `<span class="${classes}" style="${style}" title="${title}">${esc(inner.slice(s, e))}</span>`;
+    const formulaId = v.formula_id || v.ideal_id || '';
+    html += `<span class="${classes}" style="${style}" title="${title}"`
+      + ` data-formula-id="${formulaId}" data-variant-id="${v.id || ''}">`
+      + `${esc(inner.slice(s, e))}</span>`;
     i = e;
   }
   if (i < inner.length) html += esc(inner.slice(i));
@@ -1893,6 +1907,80 @@ async function renderTextDetail(docId) {
   `;
 }
 
+// ── Variant statistics (click on a highlighted variant) ─────────────────────
+document.getElementById('text-detail-list').addEventListener('click', (e) => {
+  const span = e.target.closest('.linked-span');
+  if (!span) return;
+  const formulaId = parseInt(span.dataset.formulaId, 10);
+  if (!formulaId) return;
+  e.stopPropagation();
+  openVariantStats(formulaId, span.dataset.variantId ? parseInt(span.dataset.variantId, 10) : null);
+});
+
+async function openVariantStats(formulaId, variantId) {
+  const overlay = document.getElementById('stats-overlay');
+  const body = document.getElementById('stats-body');
+  document.getElementById('stats-title').textContent = 'Variant Statistics';
+  body.innerHTML = '<div class="empty">Loading…<span class="spinner" style="margin-left:.4rem"></span></div>';
+  overlay.classList.add('open');
+  try {
+    const s = await api(`/api/formulae/${formulaId}/stats`);
+    renderVariantStats(s, variantId);
+  } catch (err) {
+    body.innerHTML = `<div class="empty">Could not load statistics: ${esc(err.message || err)}</div>`;
+  }
+}
+
+function renderVariantStats(s, variantId) {
+  const body = document.getElementById('stats-body');
+  document.getElementById('stats-title').textContent = s.formula || 'Variant Statistics';
+
+  const tagBadges = (s.tags || []).map(t => {
+    const style = t.color ? `background:${t.color};color:white;border-color:${t.color}` : '';
+    return `<span class="ctag" style="${style}">${esc(t.name)}</span>`;
+  }).join('');
+
+  function barList(items, emptyMsg) {
+    if (!items || !items.length) {
+      return `<div class="stats-empty">${emptyMsg}</div>`;
+    }
+    const max = Math.max(...items.map(i => i.count));
+    return items.map(i => `
+      <div class="stats-row">
+        <div class="stats-label" title="${esc(i.label)}">${esc(i.label)}</div>
+        <div class="stats-bar-wrap">
+          <div class="stats-bar" style="width:${max ? Math.max(2, 100 * i.count / max) : 0}%"></div>
+        </div>
+        <div class="stats-value">${i.count} <span class="stats-pct">(${i.pct}%)</span></div>
+      </div>`).join('');
+  }
+
+  body.innerHTML = `
+    <div class="stats-summary">
+      <span class="stats-total">${s.total}</span>
+      <span class="stats-total-label">linked variant${s.total !== 1 ? 's' : ''} in total</span>
+      ${tagBadges ? `<div class="stats-tags">${tagBadges}</div>` : ''}
+    </div>
+    ${s.note ? `<div class="stats-note">${esc(s.note)}</div>` : ''}
+    <div class="stats-section">
+      <h4>By Region</h4>
+      ${barList(s.regions, 'No region information available.')}
+    </div>
+    <div class="stats-section">
+      <h4>By Diplomatic Section</h4>
+      ${barList(s.sections, 'No section information available.')}
+    </div>
+    <div class="stats-section">
+      <h4>By Document</h4>
+      ${barList(s.documents, 'No documents found.')}
+    </div>
+  `;
+}
+
+function closeVariantStats() {
+  document.getElementById('stats-overlay').classList.remove('open');
+}
+
 // ── Utilities ──────────────────────────────────────────────────────────────
 function esc(s) {
   if (!s) return '';
@@ -1909,6 +1997,10 @@ function toast(msg) {
 // Close overlay on click outside
 document.getElementById('formula-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) closeFormulaModal();
+});
+
+document.getElementById('stats-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeVariantStats();
 });
 
 // New-tag sidebar input: highlight & scroll existing match while typing
